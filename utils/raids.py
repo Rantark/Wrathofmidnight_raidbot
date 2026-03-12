@@ -320,6 +320,20 @@ RAID_DATABASE: dict[str, dict[str, list[str]]] = {
             "Mug'Zee, Heads of Security", "Chrome King Gallywix",
         ],
     },
+
+    # ── Midnight ──────────────────────────────────────────────────────────────
+    "Midnight": {
+        "The Voidspire": [
+            "Imperator Averzian", "Vorasius", "Fallen-King Salhadaar",
+            "Vaelgor", "War Chaplain Senn", "Alleria Windrunner",
+        ],
+        "The Dreamrift": [
+            "Chimaerus",
+        ],
+        "March on Quel'Danas": [
+            "Belo'ren, Child of Al'ar", "L'ura",
+        ],
+    },
 }
 
 # ── Convenience lookups ───────────────────────────────────────────────────────
