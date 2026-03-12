@@ -407,7 +407,7 @@ class Events(commands.Cog):
         # Schedule reminders
         event_dt = datetime.strptime(
             f"{parsed_date.strftime('%Y-%m-%d')} {normalised_time}", "%Y-%m-%d %H:%M"
-        )
+        ).replace(tzinfo=timezone.utc)
         fire_times = []
         for label, seconds in REMINDER_INTERVALS.items():
             fire_dt = event_dt - timedelta(seconds=seconds)
