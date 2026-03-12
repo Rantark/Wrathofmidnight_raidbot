@@ -12,7 +12,7 @@ import os
 import pathlib
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands, tasks
@@ -196,7 +196,7 @@ class RaidBot(commands.Bot):
     async def auto_archive_loop(self) -> None:
         """Auto-complete events whose date/time has passed by more than 6 hours."""
         try:
-            cutoff = (datetime.utcnow() - timedelta(hours=6)).strftime("%Y-%m-%d")
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).strftime("%Y-%m-%d")
             from database.queries import _fetchall, _execute
             stale = await _fetchall(
                 config.DATABASE_PATH,
