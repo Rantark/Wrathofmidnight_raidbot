@@ -129,7 +129,16 @@ CREATE TABLE IF NOT EXISTS reminders (
     sent         INTEGER NOT NULL DEFAULT 0
 );
 
+-- ── Event channels (multiple channels per guild) ─────────────────────────────
+CREATE TABLE IF NOT EXISTS event_channels (
+    guild_id    INTEGER NOT NULL,
+    channel_id  INTEGER NOT NULL,
+    label       TEXT    NOT NULL DEFAULT '',
+    PRIMARY KEY (guild_id, channel_id)
+);
+
 -- ── Indexes ──────────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_event_channels_guild ON event_channels(guild_id);
 CREATE INDEX IF NOT EXISTS idx_characters_guild    ON characters(guild_id);
 CREATE INDEX IF NOT EXISTS idx_events_guild        ON events(guild_id);
 CREATE INDEX IF NOT EXISTS idx_signups_event       ON signups(event_id);

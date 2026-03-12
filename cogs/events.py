@@ -201,6 +201,50 @@ async def _refresh_event_embed(bot: commands.Bot, event_id: int) -> None:
     await message.edit(embed=embed)
 
 
+# ── Autocomplete helpers ──────────────────────────────────────────────────────
+
+async def _event_channel_autocomplete(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Return registered event channels as autocomplete choices."""
+    channels = await queries.get_event_channels(config.DATABASE_PATH, interaction.guild_id)
+    choices = []
+    for ch in channels:
+        label = ch["label"] or str(ch["channel_id"])
+        # filter by what the user has typed so far
+        if current.lower() in label.lower() or current in str(ch["channel_id"]):
+            choices.append(app_commands.Choice(name=label, value=str(ch["channel_id"])))
+    # Also allow typing a raw channel ID not in the list
+    if not choices and current.isdigit():
+        choices.append(app_commands.Choice(name=f"Channel {current}", value=current))
+    return choices[:25]
+
+
+async def _resolve_event_channel(
+    bot: commands.Bot,
+    interaction: discord.Interaction,
+    channel_value: Optional[str],
+) -> discord.TextChannel:
+    """
+    Resolve the target channel for an event.
+    Priority: explicit channel arg → guild default → current channel.
+    """
+    if channel_value:
+        ch = bot.get_channel(int(channel_value))
+        if ch:
+            return ch
+
+    settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+    default_id = settings.get("event_channel_id")
+    if default_id:
+        ch = bot.get_channel(default_id)
+        if ch:
+            return ch
+
+    return interaction.channel
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Events Cog
 # ══════════════════════════════════════════════════════════════════════════════
@@ -224,10 +268,12 @@ class Events(commands.Cog):
         time="Start time: HH:MM (24h) or H:MM AM/PM",
         event_type="Type of event",
         description="Optional description",
+        channel="Channel to post the event in (uses default if omitted)",
         max_tanks="Max tanks (default 2)",
         max_healers="Max healers (default 5)",
         max_dps="Max DPS (default 13)",
     )
+    @app_commands.autocomplete(channel=_event_channel_autocomplete)
     async def raid_create(
         self,
         interaction: discord.Interaction,
@@ -236,6 +282,7 @@ class Events(commands.Cog):
         time: str,
         event_type: str,
         description: Optional[str] = None,
+        channel: Optional[str] = None,
         max_tanks: int = 2,
         max_healers: int = 5,
         max_dps: int = 13,
@@ -274,8 +321,7 @@ class Events(commands.Cog):
             )
             return
 
-        settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
-        channel_id = settings.get("event_channel_id") or interaction.channel_id
+        target_channel = await _resolve_event_channel(self.bot, interaction, channel)
 
         event_id = await queries.create_event(
             config.DATABASE_PATH,
@@ -286,7 +332,7 @@ class Events(commands.Cog):
             normalised_time,
             interaction.user.id,
             description or "",
-            channel_id,
+            target_channel.id,
             max_tanks,
             max_healers,
             max_dps,
@@ -305,7 +351,6 @@ class Events(commands.Cog):
             await queries.schedule_reminders(config.DATABASE_PATH, event_id, fire_times)
 
         # Post the embed in the event channel
-        channel = self.bot.get_channel(channel_id) or interaction.channel
         empty_signups: dict = {"tanks": [], "healers": [], "dps": [], "bench": [], "tentative": [], "declined": []}
         fake_event = {
             "event_name": name,
@@ -319,12 +364,12 @@ class Events(commands.Cog):
         }
         embed = embeds.build_event_embed(fake_event, empty_signups)
         view = SignupView(event_id, self.bot)
-        msg = await channel.send(embed=embed, view=view)
-        await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, channel.id)
+        msg = await target_channel.send(embed=embed, view=view)
+        await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, target_channel.id)
 
         confirm_embed = embeds.success_embed(
             "Event Created",
-            f"**{name}** (ID: `{event_id}`) has been posted in {channel.mention}.",
+            f"**{name}** (ID: `{event_id}`) has been posted in {target_channel.mention}.",
         )
         await interaction.followup.send(embed=confirm_embed, ephemeral=True)
 
@@ -592,9 +637,15 @@ class Events(commands.Cog):
     @app_commands.describe(
         template_name="Name of the template to load",
         date="Date for the new event (YYYY-MM-DD)",
+        channel="Channel to post the event in (uses default if omitted)",
     )
+    @app_commands.autocomplete(channel=_event_channel_autocomplete)
     async def template_load(
-        self, interaction: discord.Interaction, template_name: str, date: str
+        self,
+        interaction: discord.Interaction,
+        template_name: str,
+        date: str,
+        channel: Optional[str] = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -621,8 +672,7 @@ class Events(commands.Cog):
             )
             return
 
-        settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
-        channel_id = settings.get("event_channel_id") or interaction.channel_id
+        target_channel = await _resolve_event_channel(self.bot, interaction, channel)
 
         event_id = await queries.create_event(
             config.DATABASE_PATH,
@@ -633,13 +683,12 @@ class Events(commands.Cog):
             tmpl["event_time"],
             interaction.user.id,
             tmpl["description"] or "",
-            channel_id,
+            target_channel.id,
             tmpl["max_tanks"],
             tmpl["max_healers"],
             tmpl["max_dps"],
         )
 
-        channel = self.bot.get_channel(channel_id) or interaction.channel
         empty: dict = {"tanks": [], "healers": [], "dps": [], "bench": [], "tentative": [], "declined": []}
         fake_event = {
             "event_name": tmpl["event_name"],
@@ -653,13 +702,13 @@ class Events(commands.Cog):
         }
         embed = embeds.build_event_embed(fake_event, empty)
         view = SignupView(event_id, self.bot)
-        msg = await channel.send(embed=embed, view=view)
-        await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, channel.id)
+        msg = await target_channel.send(embed=embed, view=view)
+        await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, target_channel.id)
 
         await interaction.followup.send(
             embed=embeds.success_embed(
                 "Event Created from Template",
-                f"**{tmpl['event_name']}** (ID: `{event_id}`) posted in {channel.mention}.",
+                f"**{tmpl['event_name']}** (ID: `{event_id}`) posted in {target_channel.mention}.",
             ),
             ephemeral=True,
         )

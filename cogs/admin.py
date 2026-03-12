@@ -1,7 +1,9 @@
 """
 Admin and configuration cog.
 Commands: /admin set_raid_leader, remove_raid_leader, set_event_channel,
-           roster_config, attendance_threshold, status, export_data
+           add_event_channel, remove_event_channel, list_event_channels,
+           roster_config, attendance_threshold, status, export_data,
+           restart, update
 """
 
 from __future__ import annotations
@@ -86,7 +88,7 @@ class Admin(commands.Cog):
     # ── Channel configuration ──────────────────────────────────────────────────
 
     @admin_group.command(name="set_event_channel", description="Set the default channel for event postings")
-    @app_commands.describe(channel="Channel where events will be posted")
+    @app_commands.describe(channel="Channel where events will be posted by default")
     async def set_event_channel(
         self, interaction: discord.Interaction, channel: discord.TextChannel
     ) -> None:
@@ -101,13 +103,93 @@ class Admin(commands.Cog):
         await queries.update_guild_setting(
             config.DATABASE_PATH, interaction.guild_id, "event_channel_id", channel.id
         )
+        # Also register it in the multi-channel list if not already there
+        await queries.add_event_channel(config.DATABASE_PATH, interaction.guild_id, channel.id, channel.name)
         await interaction.response.send_message(
             embed=embeds.success_embed(
-                "Channel Set",
-                f"Events will now be posted in {channel.mention} by default.",
+                "Default Channel Set",
+                f"Events will now be posted in {channel.mention} by default.\n"
+                f"It has also been added to your event channel list.",
             ),
             ephemeral=True,
         )
+
+    # ── Multi-channel management ───────────────────────────────────────────────
+
+    @admin_group.command(name="add_event_channel", description="Add a channel to the event channel list")
+    @app_commands.describe(channel="Channel to add", label="Optional friendly label (e.g. 'Heroic Raids')")
+    async def add_event_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        label: Optional[str] = None,
+    ) -> None:
+        if not is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
+                ephemeral=True,
+            )
+            return
+
+        friendly = label or channel.name
+        await queries.add_event_channel(config.DATABASE_PATH, interaction.guild_id, channel.id, friendly)
+        await interaction.response.send_message(
+            embed=embeds.success_embed(
+                "Channel Added",
+                f"{channel.mention} has been added to the event channel list as **{friendly}**.\n"
+                f"Raid leaders can now post events to this channel with `/raid create`.",
+            ),
+            ephemeral=True,
+        )
+
+    @admin_group.command(name="remove_event_channel", description="Remove a channel from the event channel list")
+    @app_commands.describe(channel="Channel to remove")
+    async def remove_event_channel(
+        self, interaction: discord.Interaction, channel: discord.TextChannel
+    ) -> None:
+        if not is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
+                ephemeral=True,
+            )
+            return
+
+        await queries.remove_event_channel(config.DATABASE_PATH, interaction.guild_id, channel.id)
+        await interaction.response.send_message(
+            embed=embeds.success_embed(
+                "Channel Removed",
+                f"{channel.mention} has been removed from the event channel list.",
+            ),
+            ephemeral=True,
+        )
+
+    @admin_group.command(name="list_event_channels", description="Show all registered event channels")
+    async def list_event_channels(self, interaction: discord.Interaction) -> None:
+        if not is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can view configuration."),
+                ephemeral=True,
+            )
+            return
+
+        channels = await queries.get_event_channels(config.DATABASE_PATH, interaction.guild_id)
+        settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        default_id = settings.get("event_channel_id")
+
+        embed = discord.Embed(title="📢  Event Channels", color=0x3498DB)
+        if not channels:
+            embed.description = (
+                "No event channels configured yet.\n"
+                "Use `/admin add_event_channel` or `/admin set_event_channel` to add one."
+            )
+        else:
+            lines = []
+            for ch in channels:
+                tag = " ⭐ **default**" if ch["channel_id"] == default_id else ""
+                lines.append(f"<#{ch['channel_id']}> — {ch['label']}{tag}")
+            embed.description = "\n".join(lines)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @admin_group.command(name="set_log_channel", description="Set the bot audit log channel")
     @app_commands.describe(channel="Channel for bot logs/audit messages")
@@ -211,19 +293,38 @@ class Admin(commands.Cog):
             return
 
         settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        channels = await queries.get_event_channels(config.DATABASE_PATH, interaction.guild_id)
         embed = discord.Embed(title="⚙️  Bot Configuration", color=0x3498DB)
 
-        evt_ch = f"<#{settings['event_channel_id']}>" if settings.get("event_channel_id") else "_Not set_"
-        log_ch = f"<#{settings['log_channel_id']}>"   if settings.get("log_channel_id")   else "_Not set_"
+        default_id = settings.get("event_channel_id")
+        evt_ch = f"<#{default_id}>" if default_id else "_Not set_"
+        log_ch = f"<#{settings['log_channel_id']}>" if settings.get("log_channel_id") else "_Not set_"
 
-        embed.add_field(name="Event Channel",         value=evt_ch, inline=True)
+        embed.add_field(name="Default Event Channel", value=evt_ch, inline=True)
         embed.add_field(name="Log Channel",           value=log_ch, inline=True)
         embed.add_field(name="Attendance Threshold",  value=f"{settings.get('attendance_threshold', 75)}%", inline=True)
         embed.add_field(name="Default Tanks",         value=str(settings.get("default_max_tanks",   2)),  inline=True)
         embed.add_field(name="Default Healers",       value=str(settings.get("default_max_healers", 5)),  inline=True)
         embed.add_field(name="Default DPS",           value=str(settings.get("default_max_dps",    13)), inline=True)
         embed.add_field(name="Timezone",              value=settings.get("timezone", "America/New_York"),  inline=True)
-        embed.add_field(name="Database",              value=f"`{config.DATABASE_PATH}`", inline=False)
+        embed.add_field(name="Database",              value=f"`{config.DATABASE_PATH}`", inline=True)
+
+        if channels:
+            ch_lines = []
+            for ch in channels:
+                tag = " ⭐" if ch["channel_id"] == default_id else ""
+                ch_lines.append(f"<#{ch['channel_id']}> {ch['label']}{tag}")
+            embed.add_field(
+                name=f"Event Channels ({len(channels)})",
+                value="\n".join(ch_lines),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Event Channels",
+                value="_None configured – use `/admin add_event_channel`_",
+                inline=False,
+            )
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -321,6 +422,77 @@ class Admin(commands.Cog):
             embed=embeds.success_embed("Commands Synced", f"Synced **{len(synced)}** commands to this server."),
             ephemeral=True,
         )
+
+    # ── Restart ────────────────────────────────────────────────────────────────
+
+    @admin_group.command(name="restart", description="Restart the bot process (admin only)")
+    async def restart(self, interaction: discord.Interaction) -> None:
+        if not is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can restart the bot."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            embed=embeds.warning_embed("Restarting…", "The bot is restarting.  It will be back online in a few seconds."),
+            ephemeral=False,   # Visible so the guild knows what's happening
+        )
+        log.info("Restart requested by %s (%d)", interaction.user, interaction.user.id)
+        # Small delay so the message is sent before the process dies
+        import asyncio
+        await asyncio.sleep(1)
+        await self.bot.do_restart()
+
+    # ── Update & Restart ───────────────────────────────────────────────────────
+
+    @admin_group.command(name="update", description="Pull latest code from git and restart (admin only)")
+    async def update(self, interaction: discord.Interaction) -> None:
+        if not is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can update the bot."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=False)  # Visible so the guild sees the update
+        log.info("Update requested by %s (%d)", interaction.user, interaction.user.id)
+
+        success, output = await self.bot.do_update()
+
+        # Truncate output if too long for Discord
+        if len(output) > 1800:
+            output = output[:1800] + "\n…(truncated)"
+
+        if not success:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Update Failed",
+                    f"**git pull** returned an error:\n```\n{output}\n```\n"
+                    f"The bot has **not** been restarted.",
+                )
+            )
+            return
+
+        already_up_to_date = "already up to date" in output.lower()
+        if already_up_to_date:
+            await interaction.followup.send(
+                embed=embeds.info_embed(
+                    "Already Up to Date",
+                    f"```\n{output}\n```\nNo changes pulled — the bot will **not** restart.",
+                )
+            )
+            return
+
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Update Successful – Restarting…",
+                f"```\n{output}\n```\nNew code pulled successfully.  Restarting now…",
+            )
+        )
+        import asyncio
+        await asyncio.sleep(1)
+        await self.bot.do_restart()
 
 
 async def setup(bot: commands.Bot) -> None:

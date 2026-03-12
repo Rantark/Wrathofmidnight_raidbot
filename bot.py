@@ -8,7 +8,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import logging.handlers
+import os
 import pathlib
+import subprocess
 import sys
 from datetime import datetime, timedelta
 
@@ -217,6 +219,40 @@ class RaidBot(commands.Bot):
         self.reminder_loop.cancel()
         self.auto_archive_loop.cancel()
         await super().close()
+
+    # ── Update & Restart ───────────────────────────────────────────────────────
+
+    async def do_restart(self) -> None:
+        """Close the bot then replace the process with a fresh instance."""
+        log.info("Restarting bot process…")
+        await self.close()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    async def do_update(self) -> tuple[bool, str]:
+        """
+        Run ``git pull`` in the bot's working directory.
+        Returns (success, output_text).
+        Does NOT restart – caller decides whether to restart after.
+        """
+        bot_dir = pathlib.Path(__file__).parent
+        try:
+            result = subprocess.run(
+                ["git", "pull"],
+                capture_output=True,
+                text=True,
+                cwd=bot_dir,
+                timeout=60,
+            )
+            output = (result.stdout + result.stderr).strip()
+            success = result.returncode == 0
+            log.info("git pull exit=%d  output=%s", result.returncode, output)
+            return success, output
+        except subprocess.TimeoutExpired:
+            return False, "git pull timed out after 60 seconds."
+        except FileNotFoundError:
+            return False, "git not found.  Make sure git is installed and in PATH."
+        except Exception as exc:
+            return False, f"Unexpected error: {exc}"
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

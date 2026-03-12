@@ -599,3 +599,34 @@ async def mark_reminder_sent(db_path: str, reminder_id: int) -> None:
     await _execute(
         db_path, "UPDATE reminders SET sent=1 WHERE reminder_id=?", (reminder_id,)
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Event Channels
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def add_event_channel(
+    db_path: str, guild_id: int, channel_id: int, label: str = ""
+) -> None:
+    await _execute(
+        db_path,
+        "INSERT OR REPLACE INTO event_channels (guild_id, channel_id, label) VALUES (?,?,?)",
+        (guild_id, channel_id, label),
+    )
+
+
+async def remove_event_channel(db_path: str, guild_id: int, channel_id: int) -> None:
+    await _execute(
+        db_path,
+        "DELETE FROM event_channels WHERE guild_id=? AND channel_id=?",
+        (guild_id, channel_id),
+    )
+
+
+async def get_event_channels(db_path: str, guild_id: int) -> list[dict]:
+    """Return all registered event channels for the guild, ordered by label."""
+    return await _fetchall(
+        db_path,
+        "SELECT channel_id, label FROM event_channels WHERE guild_id=? ORDER BY label, channel_id",
+        (guild_id,),
+    )
