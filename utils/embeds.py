@@ -131,11 +131,9 @@ def build_event_embed(
         )
 
     total = len(tanks) + len(healers) + len(dps) + len(bench) + len(tentative)
+    updated_str = f"  •  Last updated: {last_updated.strftime('%b %d %H:%M')}" if last_updated else ""
     embed.set_footer(
-        text=(
-            f"Total signups: {total}  •  "
-            + (f"Last updated: {last_updated.strftime('%b %d %H:%M')}" if last_updated else "")
-        )
+        text=f"Event ID: {event['event_id']}  •  Total signups: {total}{updated_str}"
     )
     return embed
 
