@@ -308,6 +308,7 @@ class Admin(commands.Cog):
         embed.add_field(name="Default DPS",           value=str(settings.get("default_max_dps",    13)), inline=True)
         embed.add_field(name="Timezone",              value=settings.get("timezone", "America/New_York"),  inline=True)
         embed.add_field(name="Database",              value=f"`{config.DATABASE_PATH}`", inline=True)
+        embed.add_field(name="Bot Version",           value=f"`v{config.VERSION}`", inline=True)
 
         if channels:
             ch_lines = []

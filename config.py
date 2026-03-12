@@ -27,6 +27,9 @@ def _optional(key: str, default: str = "") -> str:
     return os.getenv(key, default).strip()
 
 
+# ── Version ───────────────────────────────────────────────────────────────────
+VERSION: str = "1.1.0"
+
 # ── Required ──────────────────────────────────────────────────────────────────
 DISCORD_TOKEN: str = _require("DISCORD_TOKEN")
 GUILD_ID: int = int(_require("GUILD_ID"))

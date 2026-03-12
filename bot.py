@@ -109,13 +109,14 @@ class RaidBot(commands.Bot):
     async def on_ready(self) -> None:
         log.info("=" * 60)
         log.info("Bot online: %s (ID: %s)", self.user, self.user.id)
-        log.info("Guild: %d", config.GUILD_ID)
+        log.info("Version:  %s", config.VERSION)
+        log.info("Guild:    %d", config.GUILD_ID)
         log.info("Database: %s", config.DATABASE_PATH)
         log.info("=" * 60)
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="the raid calendar 📅",
+                name=f"the raid calendar 📅  v{config.VERSION}",
             )
         )
 
