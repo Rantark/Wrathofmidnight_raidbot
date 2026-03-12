@@ -28,7 +28,7 @@ def _optional(key: str, default: str = "") -> str:
 
 
 # ── Version ───────────────────────────────────────────────────────────────────
-VERSION: str = "1.3.1"
+VERSION: str = "1.4.0"
 
 # ── Required ──────────────────────────────────────────────────────────────────
 DISCORD_TOKEN: str = _require("DISCORD_TOKEN")
@@ -41,6 +41,10 @@ ATTENDANCE_WARNING_THRESHOLD: int = int(_optional("ATTENDANCE_WARNING_THRESHOLD"
 TIMEZONE: str = _optional("TIMEZONE", "America/New_York")
 COMMAND_PREFIX: str = _optional("COMMAND_PREFIX", "!")
 DATABASE_PATH: str = _optional("DATABASE_PATH", "./data/raidbot.db")
+
+# ── Blizzard Battle.net API (optional – enables auto character lookup) ─────────
+BNET_CLIENT_ID:     str = _optional("BNET_CLIENT_ID")
+BNET_CLIENT_SECRET: str = _optional("BNET_CLIENT_SECRET")
 
 # Derived
 import pathlib

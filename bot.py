@@ -87,6 +87,14 @@ class RaidBot(commands.Bot):
         log.info("Initialising database…")
         await init_db(config.DATABASE_PATH)
 
+        # Initialise Blizzard API client if credentials are configured
+        if config.BNET_CLIENT_ID and config.BNET_CLIENT_SECRET:
+            from utils.blizzard import init_client as bnet_init
+            bnet_init(config.BNET_CLIENT_ID, config.BNET_CLIENT_SECRET)
+            log.info("Blizzard Battle.net API client ready")
+        else:
+            log.info("Blizzard API not configured (BNET_CLIENT_ID/SECRET not set)")
+
         log.info("Loading cogs…")
         for cog in COGS:
             try:

@@ -1,6 +1,6 @@
 """
 Character management cog.
-Commands: /character add, main, list, update, remove
+Commands: /character add, main, list, update, remove, sync
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from typing import Optional
 import config
 from database import queries
 from utils import embeds
+from utils import blizzard as bnet
 from utils.constants import VALID_SPECS, ALL_SPECS, CLASS_COLORS
 from utils.validators import validate_class, validate_spec, validate_ilvl, validate_char_name
 
@@ -29,20 +30,24 @@ class Characters(commands.Cog):
     # ── /character ────────────────────────────────────────────────────────────
     char_group = app_commands.Group(name="character", description="Manage your WoW characters")
 
-    @char_group.command(name="add", description="Register a new WoW character")
+    @char_group.command(name="add", description="Register a new WoW character (auto-fills from Armory if realm provided)")
     @app_commands.describe(
-        name="Character name (2-12 letters)",
-        char_class="WoW class (e.g. Warrior, Druid)",
-        main_spec="Main spec (e.g. Protection, Balance)",
+        name="Character name",
+        realm="Realm name — triggers Armory lookup to auto-fill class/spec/ilvl (optional)",
+        region="Region: us, eu, kr, tw (default: us)",
+        char_class="WoW class — required if no realm, optional override with realm",
+        main_spec="Main spec — required if no realm, optional override with realm",
         off_spec="Off spec (optional)",
-        ilvl="Item level (optional)",
+        ilvl="Item level — auto-filled from Armory if realm provided",
     )
     async def character_add(
         self,
         interaction: discord.Interaction,
         name: str,
-        char_class: str,
-        main_spec: str,
+        realm: Optional[str] = None,
+        region: str = "us",
+        char_class: Optional[str] = None,
+        main_spec: Optional[str] = None,
         off_spec: Optional[str] = None,
         ilvl: Optional[int] = None,
     ) -> None:
@@ -58,6 +63,81 @@ class Characters(commands.Cog):
             )
             return
 
+        region = region.lower().strip()
+        if region not in bnet.BlizzardClient.REGIONS:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Invalid Region",
+                    f"Region must be one of: {', '.join(bnet.BlizzardClient.REGIONS)}",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # ── Blizzard Armory lookup ────────────────────────────────────────────
+        api_race:       Optional[str] = None
+        api_faction:    Optional[str] = None
+        api_avatar_url: Optional[str] = None
+
+        if realm:
+            client = bnet.get_client()
+            if not client:
+                await interaction.followup.send(
+                    embed=embeds.error_embed(
+                        "API Not Configured",
+                        "Blizzard API credentials are not set up on this bot.\n"
+                        "Register your character manually by omitting the `realm` field.",
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                embed=embeds.info_embed("🔍 Looking up character…", f"Fetching **{name}**–{realm} from the Armory…"),
+                ephemeral=True,
+            )
+
+            api_data = await client.get_character(region, realm, name)
+            if api_data is None:
+                await interaction.followup.send(
+                    embed=embeds.error_embed(
+                        "Character Not Found",
+                        f"**{name}** on **{realm}-{region.upper()}** was not found in the Armory.\n"
+                        "Check the spelling and try again, or register manually (omit `realm`).",
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            # Auto-fill fields from API (user overrides take priority)
+            if not char_class:
+                char_class = api_data.get("character_class", {}).get("name")
+            if not main_spec:
+                main_spec = api_data.get("active_spec", {}).get("name")
+            if ilvl is None:
+                ilvl = api_data.get("average_item_level") or None
+
+            api_race    = api_data.get("race",    {}).get("name")
+            api_faction = api_data.get("faction", {}).get("name")
+
+            # Fetch avatar URL (best-effort, non-fatal)
+            media = await client.get_character_media(region, realm, name)
+            if media:
+                api_avatar_url = client.extract_avatar_url(media)
+
+        # ── Validate class / spec ─────────────────────────────────────────────
+        if not char_class:
+            class_list = "\n".join(f"• {c}" for c in sorted(VALID_SPECS.keys()))
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Class Required",
+                    f"Provide `char_class` or use the `realm` parameter for Armory lookup.\n\n"
+                    f"Valid classes:\n{class_list}",
+                ),
+                ephemeral=True,
+            )
+            return
+
         validated_class = validate_class(char_class)
         if not validated_class:
             class_list = "\n".join(f"• {c}" for c in sorted(VALID_SPECS.keys()))
@@ -65,6 +145,18 @@ class Characters(commands.Cog):
                 embed=embeds.error_embed(
                     "Invalid Class",
                     f"**{char_class}** is not a valid WoW class.\n\nValid classes:\n{class_list}",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        if not main_spec:
+            spec_list = "\n".join(f"• {s}" for s in ALL_SPECS[validated_class])
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Spec Required",
+                    f"Provide `main_spec` or use the `realm` parameter for Armory lookup.\n\n"
+                    f"Valid specs for {validated_class}:\n{spec_list}",
                 ),
                 ephemeral=True,
             )
@@ -102,7 +194,7 @@ class Characters(commands.Cog):
             )
             return
 
-        # Check for duplicate name
+        # ── Duplicate check ───────────────────────────────────────────────────
         existing = await queries.get_character(
             config.DATABASE_PATH, interaction.user.id, interaction.guild_id, name
         )
@@ -125,6 +217,11 @@ class Characters(commands.Cog):
             validated_spec,
             validated_off,
             ilvl,
+            race=api_race,
+            realm=realm,
+            region=region if realm else None,
+            avatar_url=api_avatar_url,
+            faction=api_faction,
         )
 
         color = CLASS_COLORS.get(validated_class, 0x3498DB)
@@ -138,6 +235,16 @@ class Characters(commands.Cog):
             embed.add_field(name="Off Spec", value=validated_off, inline=True)
         if ilvl:
             embed.add_field(name="Item Level", value=str(ilvl), inline=True)
+        if api_race:
+            embed.add_field(name="Race",    value=api_race,    inline=True)
+        if api_faction:
+            embed.add_field(name="Faction", value=api_faction, inline=True)
+        if realm:
+            embed.add_field(name="Realm",   value=f"{realm.title()} ({region.upper()})", inline=True)
+        if api_avatar_url:
+            embed.set_thumbnail(url=api_avatar_url)
+        if realm:
+            embed.set_footer(text="✨ Data auto-filled from the Blizzard Armory")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @char_group.command(name="main", description="Set your main character")
@@ -244,6 +351,94 @@ class Characters(commands.Cog):
             embed=embeds.success_embed("Character Updated", f"**{char['char_name']}** has been updated."),
             ephemeral=True,
         )
+
+    @char_group.command(name="sync", description="Re-sync a character's class/spec/ilvl from the Blizzard Armory")
+    @app_commands.describe(name="Character name to sync")
+    async def character_sync(self, interaction: discord.Interaction, name: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        client = bnet.get_client()
+        if not client:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "API Not Configured",
+                    "Blizzard API credentials are not set up on this bot.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        char = await queries.get_character(
+            config.DATABASE_PATH, interaction.user.id, interaction.guild_id, name
+        )
+        if not char:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No character named **{name}** found."),
+                ephemeral=True,
+            )
+            return
+
+        realm  = char.get("realm")
+        region = char.get("region") or "us"
+        if not realm:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "No Realm Stored",
+                    f"**{char['char_name']}** has no realm on record.\n"
+                    "Remove and re-add with the `realm` field to enable Armory sync.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        api_data = await client.get_character(region, realm, char["char_name"])
+        if api_data is None:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Not Found in Armory",
+                    f"**{char['char_name']}** on **{realm}-{region.upper()}** could not be found.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        updates: dict = {}
+        new_ilvl = api_data.get("average_item_level")
+        if new_ilvl:
+            updates["ilvl"] = new_ilvl
+        new_race = api_data.get("race", {}).get("name")
+        if new_race:
+            updates["race"] = new_race
+        new_faction = api_data.get("faction", {}).get("name")
+        if new_faction:
+            updates["faction"] = new_faction
+
+        media = await client.get_character_media(region, realm, char["char_name"])
+        if media:
+            avatar = client.extract_avatar_url(media)
+            if avatar:
+                updates["avatar_url"] = avatar
+
+        if updates:
+            await queries.update_character(
+                config.DATABASE_PATH, interaction.user.id, interaction.guild_id, name, **updates
+            )
+
+        color = CLASS_COLORS.get(char["char_class"], 0x3498DB)
+        embed = discord.Embed(
+            title=f"🔄  Armory Sync: {char['char_name']}",
+            color=color,
+        )
+        if new_ilvl:
+            embed.add_field(name="Item Level", value=str(new_ilvl), inline=True)
+        if new_race:
+            embed.add_field(name="Race",       value=new_race,      inline=True)
+        if new_faction:
+            embed.add_field(name="Faction",    value=new_faction,   inline=True)
+        if updates.get("avatar_url"):
+            embed.set_thumbnail(url=updates["avatar_url"])
+        embed.set_footer(text=f"Synced from {realm.title()}-{region.upper()}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @char_group.command(name="remove", description="Remove a registered character")
     @app_commands.describe(name="Character name to remove")

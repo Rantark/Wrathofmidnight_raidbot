@@ -172,6 +172,12 @@ async def init_db(db_path: str) -> None:
         migrations = [
             "ALTER TABLE events ADD COLUMN boss_message_id INTEGER",
             "ALTER TABLE events ADD COLUMN boss_channel_id INTEGER",
+            # Blizzard API enrichment columns on characters
+            "ALTER TABLE characters ADD COLUMN race       TEXT",
+            "ALTER TABLE characters ADD COLUMN realm      TEXT",
+            "ALTER TABLE characters ADD COLUMN region     TEXT",
+            "ALTER TABLE characters ADD COLUMN avatar_url TEXT",
+            "ALTER TABLE characters ADD COLUMN faction    TEXT",
         ]
         for sql in migrations:
             try:

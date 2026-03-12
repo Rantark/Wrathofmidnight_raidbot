@@ -121,6 +121,11 @@ async def add_character(
     main_spec: str,
     off_spec: Optional[str] = None,
     ilvl: Optional[int] = None,
+    race: Optional[str] = None,
+    realm: Optional[str] = None,
+    region: Optional[str] = None,
+    avatar_url: Optional[str] = None,
+    faction: Optional[str] = None,
 ) -> None:
     # If this is the user's first character, make it their main automatically
     existing = await get_user_characters(db_path, discord_id, guild_id)
@@ -128,9 +133,11 @@ async def add_character(
     await _execute(
         db_path,
         """INSERT INTO characters
-           (discord_id, guild_id, char_name, char_class, main_spec, off_spec, is_main, ilvl)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (discord_id, guild_id, char_name, char_class, main_spec, off_spec, is_main, ilvl),
+           (discord_id, guild_id, char_name, char_class, main_spec, off_spec,
+            is_main, ilvl, race, realm, region, avatar_url, faction)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (discord_id, guild_id, char_name, char_class, main_spec, off_spec,
+         is_main, ilvl, race, realm, region, avatar_url, faction),
     )
 
 
@@ -187,7 +194,7 @@ async def update_character(
     char_name: str,
     **kwargs: Any,
 ) -> None:
-    allowed = {"main_spec", "off_spec", "ilvl", "notes"}
+    allowed = {"main_spec", "off_spec", "ilvl", "notes", "race", "realm", "region", "avatar_url", "faction"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not updates:
         return
