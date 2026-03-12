@@ -129,6 +129,19 @@ CREATE TABLE IF NOT EXISTS reminders (
     sent         INTEGER NOT NULL DEFAULT 0
 );
 
+-- ── Boss progress per event ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS event_bosses (
+    boss_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id    INTEGER NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+    raid_name   TEXT    NOT NULL,
+    boss_name   TEXT    NOT NULL,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    defeated    INTEGER NOT NULL DEFAULT 0,
+    defeated_at TEXT,
+    marked_by   INTEGER,
+    UNIQUE (event_id, boss_name)
+);
+
 -- ── Event channels (multiple channels per guild) ─────────────────────────────
 CREATE TABLE IF NOT EXISTS event_channels (
     guild_id    INTEGER NOT NULL,
@@ -138,6 +151,7 @@ CREATE TABLE IF NOT EXISTS event_channels (
 );
 
 -- ── Indexes ──────────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_event_bosses_event   ON event_bosses(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_channels_guild ON event_channels(guild_id);
 CREATE INDEX IF NOT EXISTS idx_characters_guild    ON characters(guild_id);
 CREATE INDEX IF NOT EXISTS idx_events_guild        ON events(guild_id);
@@ -152,5 +166,18 @@ async def init_db(db_path: str) -> None:
     """Create all tables and indexes.  Safe to call on every startup."""
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(SCHEMA)
+
+        # ── Schema migrations (idempotent ALTER TABLE additions) ──────────────
+        # These handle upgrading existing databases that predate a column.
+        migrations = [
+            "ALTER TABLE events ADD COLUMN boss_message_id INTEGER",
+            "ALTER TABLE events ADD COLUMN boss_channel_id INTEGER",
+        ]
+        for sql in migrations:
+            try:
+                await db.execute(sql)
+            except Exception:
+                pass  # Column already exists – that's fine
+
         await db.commit()
     log.info("Database initialised at %s", db_path)

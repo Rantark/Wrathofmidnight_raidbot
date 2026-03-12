@@ -228,3 +228,59 @@ def build_reminder_embed(event: dict[str, Any], time_label: str, signed_up: int)
         "Need to report an absence? Use `/absence request`."
     )
     return embed
+
+
+# ── Boss Progress embed ───────────────────────────────────────────────────────
+
+def build_boss_progress_embed(
+    event: dict[str, Any],
+    bosses: list[dict[str, Any]],
+) -> discord.Embed:
+    """
+    Build the live boss-progress embed for an event.
+
+    ``bosses`` – ordered list of rows from event_bosses table.
+    """
+    if not bosses:
+        return info_embed("No Bosses Set", "No boss list has been assigned to this event yet.")
+
+    raid_name = bosses[0]["raid_name"]
+    total     = len(bosses)
+    defeated  = sum(1 for b in bosses if b["defeated"])
+    pct       = defeated / total * 100 if total else 0
+
+    # Progress bar (10 chars wide)
+    filled  = round(pct / 10)
+    bar     = "█" * filled + "░" * (10 - filled)
+
+    color = SUCCESS_COLOR if defeated == total else (WARNING_COLOR if defeated > 0 else BOT_COLOR)
+
+    embed = discord.Embed(
+        title=f"⚔️  Boss Progress: {event['event_name']}",
+        color=color,
+    )
+    embed.add_field(name="Raid",     value=raid_name,                            inline=True)
+    embed.add_field(name="Date",     value=event.get("event_date", "?"),         inline=True)
+    embed.add_field(name="Progress", value=f"{defeated}/{total}  `{bar}`  {pct:.0f}%", inline=False)
+
+    # Boss list – two columns
+    left_lines:  list[str] = []
+    right_lines: list[str] = []
+    for i, boss in enumerate(bosses):
+        icon = "✅" if boss["defeated"] else "❌"
+        line = f"{icon} {boss['boss_name']}"
+        if i % 2 == 0:
+            left_lines.append(line)
+        else:
+            right_lines.append(line)
+
+    embed.add_field(name="\u200b", value="\n".join(left_lines)  or "\u200b", inline=True)
+    embed.add_field(name="\u200b", value="\n".join(right_lines) or "\u200b", inline=True)
+
+    if defeated == total:
+        embed.set_footer(text="🏆  All bosses defeated!  Raid clear!")
+    else:
+        remaining = total - defeated
+        embed.set_footer(text=f"{remaining} boss{'es' if remaining != 1 else ''} remaining")
+
+    return embed

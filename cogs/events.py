@@ -1,6 +1,8 @@
 """
 Event management cog.
-Commands: /raid create, edit, cancel, list, info, lock, template save/load/list/delete
+Commands: /raid create, edit, cancel, list, info, lock,
+          template save/load/list/delete,
+          bosses set/show/mark/reset/clear
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from database import queries
 from utils import embeds
 from utils.constants import EVENT_TYPES, REMINDER_INTERVALS
 from utils.validators import validate_date, validate_time, validate_event_type
+from utils.raids import find_raid, get_bosses, RAID_EXPANSION
 
 log = logging.getLogger(__name__)
 
@@ -259,6 +262,9 @@ class Events(commands.Cog):
     raid_group = app_commands.Group(name="raid", description="Raid and event management")
     template_group = app_commands.Group(
         name="template", description="Event templates", parent=raid_group
+    )
+    bosses_group = app_commands.Group(
+        name="bosses", description="Boss progress tracking", parent=raid_group
     )
 
     @raid_group.command(name="create", description="Create a new raid event")
@@ -759,6 +765,325 @@ class Events(commands.Cog):
             embed=embeds.success_embed("Template Deleted", f"Template **{template_name}** deleted."),
             ephemeral=True,
         )
+
+
+    # ── /raid bosses autocomplete ──────────────────────────────────────────────
+
+    async def _raid_name_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        matches = find_raid(current)
+        return [app_commands.Choice(name=r, value=r) for r in matches]
+
+    async def _boss_name_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete boss names from the bosses already assigned to the event."""
+        # Pull event_id from the interaction namespace if available
+        event_id: Optional[int] = None
+        try:
+            event_id = int(interaction.namespace.event_id)
+        except (AttributeError, TypeError, ValueError):
+            return []
+
+        boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
+        q = current.lower()
+        return [
+            app_commands.Choice(name=b["boss_name"], value=b["boss_name"])
+            for b in boss_rows
+            if q in b["boss_name"].lower()
+        ][:25]
+
+    # ── Boss progress interactive view ────────────────────────────────────────
+
+    async def _refresh_boss_embed(self, event_id: int) -> None:
+        """Re-fetch boss data and edit the live boss-progress message."""
+        event = await queries.get_event(config.DATABASE_PATH, event_id)
+        if not event or not event.get("boss_message_id") or not event.get("boss_channel_id"):
+            return
+        channel = self.bot.get_channel(event["boss_channel_id"])
+        if not channel:
+            return
+        try:
+            msg = await channel.fetch_message(event["boss_message_id"])
+        except discord.NotFound:
+            return
+        boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
+        embed = embeds.build_boss_progress_embed(event, boss_rows)
+        await msg.edit(embed=embed)
+
+    # ── /raid bosses set ───────────────────────────────────────────────────────
+
+    @bosses_group.command(name="set", description="Assign a raid's boss list to this event")
+    @app_commands.describe(
+        event_id="Event ID",
+        raid_name="Name of the WoW raid (autocomplete available)",
+    )
+    @app_commands.autocomplete(raid_name=_raid_name_autocomplete)
+    async def bosses_set(
+        self,
+        interaction: discord.Interaction,
+        event_id: int,
+        raid_name: str,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        if not await is_raid_leader(interaction):
+            await interaction.followup.send(
+                embed=embeds.error_embed("Permission Denied", "Only raid leaders can configure boss tracking."),
+                ephemeral=True,
+            )
+            return
+
+        event = await queries.get_event(config.DATABASE_PATH, event_id)
+        if not event or event["guild_id"] != interaction.guild_id:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No event with ID `{event_id}`."),
+                ephemeral=True,
+            )
+            return
+
+        boss_list = get_bosses(raid_name)
+        if not boss_list:
+            # Try partial match
+            matches = find_raid(raid_name)
+            if matches:
+                hint = "\n".join(f"• {m}" for m in matches[:5])
+                await interaction.followup.send(
+                    embed=embeds.error_embed(
+                        "Raid Not Found",
+                        f"**{raid_name}** not found.  Did you mean:\n{hint}",
+                    ),
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    embed=embeds.error_embed(
+                        "Raid Not Found",
+                        f"**{raid_name}** is not in the raid database.  "
+                        f"Start typing to see autocomplete suggestions.",
+                    ),
+                    ephemeral=True,
+                )
+            return
+
+        expansion = RAID_EXPANSION.get(raid_name, "")
+        await queries.set_event_bosses(config.DATABASE_PATH, event_id, raid_name, boss_list)
+
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Boss List Set",
+                f"**{raid_name}** ({expansion}) — **{len(boss_list)} bosses** assigned to "
+                f"event `{event_id}`.\n\n"
+                f"Use `/raid bosses show` to post the progress tracker, or "
+                f"`/raid bosses mark` to update individual bosses.",
+            ),
+            ephemeral=True,
+        )
+
+        # Refresh live embed if one exists
+        await self._refresh_boss_embed(event_id)
+
+    # ── /raid bosses show ──────────────────────────────────────────────────────
+
+    @bosses_group.command(name="show", description="Post the boss progress tracker for an event")
+    @app_commands.describe(event_id="Event ID")
+    async def bosses_show(self, interaction: discord.Interaction, event_id: int) -> None:
+        await interaction.response.defer()
+
+        event = await queries.get_event(config.DATABASE_PATH, event_id)
+        if not event or event["guild_id"] != interaction.guild_id:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No event with ID `{event_id}`."),
+                ephemeral=True,
+            )
+            return
+
+        boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
+        embed = embeds.build_boss_progress_embed(event, boss_rows)
+
+        # If a boss embed message already exists, edit it; otherwise post new
+        if event.get("boss_message_id") and event.get("boss_channel_id"):
+            ch = self.bot.get_channel(event["boss_channel_id"])
+            if ch:
+                try:
+                    existing = await ch.fetch_message(event["boss_message_id"])
+                    await existing.edit(embed=embed)
+                    await interaction.followup.send(
+                        embed=embeds.success_embed("Progress Updated", "Boss tracker embed refreshed."),
+                        ephemeral=True,
+                    )
+                    return
+                except discord.NotFound:
+                    pass  # Message gone — post a new one
+
+        msg = await interaction.followup.send(embed=embed)
+        await queries.set_boss_embed(config.DATABASE_PATH, event_id, msg.id, interaction.channel_id)
+
+    # ── /raid bosses mark ──────────────────────────────────────────────────────
+
+    @bosses_group.command(name="mark", description="Mark a boss as defeated or alive")
+    @app_commands.describe(
+        event_id="Event ID",
+        boss_name="Boss name (autocomplete from assigned bosses)",
+        defeated="True = defeated, False = alive",
+    )
+    @app_commands.autocomplete(boss_name=_boss_name_autocomplete)
+    async def bosses_mark(
+        self,
+        interaction: discord.Interaction,
+        event_id: int,
+        boss_name: str,
+        defeated: bool,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        if not await is_raid_leader(interaction):
+            await interaction.followup.send(
+                embed=embeds.error_embed("Permission Denied", "Only raid leaders can mark bosses."),
+                ephemeral=True,
+            )
+            return
+
+        event = await queries.get_event(config.DATABASE_PATH, event_id)
+        if not event or event["guild_id"] != interaction.guild_id:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No event with ID `{event_id}`."),
+                ephemeral=True,
+            )
+            return
+
+        boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
+        if not boss_rows:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "No Bosses", f"No boss list set for event `{event_id}`. Use `/raid bosses set` first."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # Match boss name case-insensitively
+        match = next((b for b in boss_rows if b["boss_name"].lower() == boss_name.lower()), None)
+        if not match:
+            available = "\n".join(f"• {b['boss_name']}" for b in boss_rows)
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Boss Not Found",
+                    f"**{boss_name}** not found in this event's boss list.\n\n{available}",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await queries.mark_boss(
+            config.DATABASE_PATH, event_id, boss_name, defeated, interaction.user.id
+        )
+
+        status_str = "✅ **Defeated**" if defeated else "❌ **Alive**"
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Boss Updated",
+                f"**{match['boss_name']}** → {status_str}",
+            ),
+            ephemeral=True,
+        )
+        await self._refresh_boss_embed(event_id)
+
+    # ── /raid bosses reset ─────────────────────────────────────────────────────
+
+    @bosses_group.command(name="reset", description="Reset all bosses to alive (keep the list)")
+    @app_commands.describe(event_id="Event ID")
+    async def bosses_reset(self, interaction: discord.Interaction, event_id: int) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        if not await is_raid_leader(interaction):
+            await interaction.followup.send(
+                embed=embeds.error_embed("Permission Denied", "Only raid leaders can reset boss progress."),
+                ephemeral=True,
+            )
+            return
+
+        event = await queries.get_event(config.DATABASE_PATH, event_id)
+        if not event or event["guild_id"] != interaction.guild_id:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No event with ID `{event_id}`."),
+                ephemeral=True,
+            )
+            return
+
+        await queries.clear_boss_progress(config.DATABASE_PATH, event_id)
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Progress Reset",
+                f"All bosses for event `{event_id}` have been reset to ❌ Alive.",
+            ),
+            ephemeral=True,
+        )
+        await self._refresh_boss_embed(event_id)
+
+    # ── /raid bosses list ──────────────────────────────────────────────────────
+
+    @bosses_group.command(name="list", description="Show boss progress for an event (ephemeral)")
+    @app_commands.describe(event_id="Event ID")
+    async def bosses_list(self, interaction: discord.Interaction, event_id: int) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        event = await queries.get_event(config.DATABASE_PATH, event_id)
+        if not event or event["guild_id"] != interaction.guild_id:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No event with ID `{event_id}`."),
+                ephemeral=True,
+            )
+            return
+
+        boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
+        embed = embeds.build_boss_progress_embed(event, boss_rows)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ── /raid bosses raids ─────────────────────────────────────────────────────
+
+    @bosses_group.command(name="raids", description="Browse all available raids in the database")
+    @app_commands.describe(expansion="Filter by expansion (optional)")
+    @app_commands.choices(expansion=[
+        app_commands.Choice(name="Classic",                    value="Classic"),
+        app_commands.Choice(name="The Burning Crusade",        value="The Burning Crusade"),
+        app_commands.Choice(name="Wrath of the Lich King",     value="Wrath of the Lich King"),
+        app_commands.Choice(name="Cataclysm",                  value="Cataclysm"),
+        app_commands.Choice(name="Mists of Pandaria",          value="Mists of Pandaria"),
+        app_commands.Choice(name="Warlords of Draenor",        value="Warlords of Draenor"),
+        app_commands.Choice(name="Legion",                     value="Legion"),
+        app_commands.Choice(name="Battle for Azeroth",         value="Battle for Azeroth"),
+        app_commands.Choice(name="Shadowlands",                value="Shadowlands"),
+        app_commands.Choice(name="Dragonflight",               value="Dragonflight"),
+        app_commands.Choice(name="The War Within",             value="The War Within"),
+    ])
+    async def bosses_raids(
+        self,
+        interaction: discord.Interaction,
+        expansion: Optional[str] = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        from utils.raids import RAID_DATABASE
+        embed = discord.Embed(
+            title="📚  WoW Raid Database",
+            color=0x3498DB,
+        )
+
+        expansions = {expansion: RAID_DATABASE[expansion]} if expansion and expansion in RAID_DATABASE \
+                     else RAID_DATABASE
+
+        for exp_name, raids in expansions.items():
+            raid_lines = [f"• {raid} ({len(bosses)} bosses)" for raid, bosses in raids.items()]
+            embed.add_field(
+                name=exp_name,
+                value="\n".join(raid_lines),
+                inline=False,
+            )
+
+        embed.set_footer(text="Use /raid bosses set to assign any raid to an event")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

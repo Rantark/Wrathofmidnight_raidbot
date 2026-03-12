@@ -630,3 +630,71 @@ async def get_event_channels(db_path: str, guild_id: int) -> list[dict]:
         "SELECT channel_id, label FROM event_channels WHERE guild_id=? ORDER BY label, channel_id",
         (guild_id,),
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Boss Progress
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def set_event_bosses(
+    db_path: str, event_id: int, raid_name: str, boss_names: list[str]
+) -> None:
+    """
+    Replace the boss list for an event.
+    Deletes any existing bosses for this event then inserts the new list.
+    """
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("PRAGMA foreign_keys=ON")
+        await db.execute("DELETE FROM event_bosses WHERE event_id=?", (event_id,))
+        await db.executemany(
+            "INSERT INTO event_bosses (event_id, raid_name, boss_name, sort_order) VALUES (?,?,?,?)",
+            [(event_id, raid_name, name, i) for i, name in enumerate(boss_names)],
+        )
+        await db.commit()
+
+
+async def get_event_bosses(db_path: str, event_id: int) -> list[dict]:
+    """Return all boss rows for an event in encounter order."""
+    return await _fetchall(
+        db_path,
+        "SELECT * FROM event_bosses WHERE event_id=? ORDER BY sort_order",
+        (event_id,),
+    )
+
+
+async def mark_boss(
+    db_path: str,
+    event_id: int,
+    boss_name: str,
+    defeated: bool,
+    marked_by: Optional[int] = None,
+) -> None:
+    """Toggle a single boss's defeated status."""
+    defeated_at = _now() if defeated else None
+    await _execute(
+        db_path,
+        """UPDATE event_bosses
+           SET defeated=?, defeated_at=?, marked_by=?
+           WHERE event_id=? AND LOWER(boss_name)=LOWER(?)""",
+        (1 if defeated else 0, defeated_at, marked_by, event_id, boss_name),
+    )
+
+
+async def clear_boss_progress(db_path: str, event_id: int) -> None:
+    """Reset all bosses for an event back to alive."""
+    await _execute(
+        db_path,
+        "UPDATE event_bosses SET defeated=0, defeated_at=NULL, marked_by=NULL WHERE event_id=?",
+        (event_id,),
+    )
+
+
+async def set_boss_embed(
+    db_path: str, event_id: int, message_id: int, channel_id: int
+) -> None:
+    """Store the message ID of the live boss-progress embed."""
+    await _execute(
+        db_path,
+        "UPDATE events SET boss_message_id=?, boss_channel_id=? WHERE event_id=?",
+        (message_id, channel_id, event_id),
+    )
