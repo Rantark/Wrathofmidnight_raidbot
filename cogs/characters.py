@@ -33,8 +33,8 @@ class Characters(commands.Cog):
     @char_group.command(name="add", description="Register a new WoW character (auto-fills from Armory if realm provided)")
     @app_commands.describe(
         name="Character name",
-        realm="Realm name — triggers Armory lookup to auto-fill class/spec/ilvl (optional)",
-        region="Region: us, eu, kr, tw (default: us)",
+        realm="Your realm name only, no region suffix (e.g. Anvilmar)",
+        region="Your region: us, eu, kr, tw (default: us)",
         char_class="WoW class — required if no realm, optional override with realm",
         main_spec="Main spec — required if no realm, optional override with realm",
         off_spec="Off spec (optional)",

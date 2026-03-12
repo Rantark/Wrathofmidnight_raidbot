@@ -117,15 +117,21 @@ class BlizzardClient:
         if not token:
             return None
 
+        # Strip any region suffix the user may have appended (e.g. "Anvilmar-US")
+        realm = re.sub(r"-(us|eu|kr|tw)$", "", realm.lower().strip())
+        realm_slug = slugify(realm)
+        char_slug  = slugify(name)
+
         url = (
             f"https://{region}.api.blizzard.com"
-            f"/profile/wow/character/{slugify(realm)}/{slugify(name)}"
+            f"/profile/wow/character/{realm_slug}/{char_slug}"
         )
         params = {
             "namespace": f"profile-{region}",
             "locale":    "en_US",
             "access_token": token,
         }
+        log.info("Blizzard character lookup: GET %s (namespace=%s)", url, f"profile-{region}")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
