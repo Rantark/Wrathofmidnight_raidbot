@@ -40,6 +40,7 @@ def build_event_embed(
     *,
     locked: bool = False,
     last_updated: datetime | None = None,
+    bosses: list[dict] | None = None,
 ) -> discord.Embed:
     """
     Build the main roster embed for an event.
@@ -129,6 +130,35 @@ def build_event_embed(
             value=names,
             inline=False,
         )
+
+    # ── Boss progress section (if bosses are assigned) ────────────────────────
+    if bosses:
+        b_defeated = sum(1 for b in bosses if b["defeated"])
+        b_total    = len(bosses)
+        b_pct      = b_defeated / b_total * 100 if b_total else 0
+        b_filled   = round(b_pct / 10)
+        b_bar      = "█" * b_filled + "░" * (10 - b_filled)
+        raid_name  = bosses[0]["raid_name"]
+
+        embed.add_field(name="\u200b", value="─" * 36, inline=False)
+        embed.add_field(
+            name=f"⚔️  {raid_name}",
+            value=f"Progress: **{b_defeated}/{b_total}**  `{b_bar}`  {b_pct:.0f}%",
+            inline=False,
+        )
+
+        left_lines:  list[str] = []
+        right_lines: list[str] = []
+        for i, boss in enumerate(bosses):
+            icon = "✅" if boss["defeated"] else "⚔️"
+            line = f"{icon} {boss['boss_name']}"
+            if i % 2 == 0:
+                left_lines.append(line)
+            else:
+                right_lines.append(line)
+
+        embed.add_field(name="\u200b", value="\n".join(left_lines)  or "\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\n".join(right_lines) or "\u200b", inline=True)
 
     total = len(tanks) + len(healers) + len(dps) + len(bench) + len(tentative)
     updated_str = f"  •  Last updated: {last_updated.strftime('%b %d %H:%M')}" if last_updated else ""
@@ -224,6 +254,47 @@ def build_reminder_embed(event: dict[str, Any], time_label: str, signed_up: int)
     embed.description = (
         "Not signed up yet? Click the buttons on the event message!\n"
         "Need to report an absence? Use `/absence request`."
+    )
+    return embed
+
+
+# ── Boss Control Panel embed (admin channel) ──────────────────────────────────
+
+def build_boss_control_embed(
+    event: dict[str, Any],
+    bosses: list[dict[str, Any]],
+) -> discord.Embed:
+    """
+    Embed displayed in the admin/log channel alongside the boss toggle buttons.
+    Raid leaders click buttons below this embed to toggle bosses alive/defeated.
+    """
+    if not bosses:
+        return info_embed("No Bosses Set", "Use `/raid bosses set` to assign a raid first.")
+
+    raid_name  = bosses[0]["raid_name"]
+    defeated   = sum(1 for b in bosses if b["defeated"])
+    total      = len(bosses)
+    pct        = defeated / total * 100 if total else 0
+    filled     = round(pct / 10)
+    bar        = "█" * filled + "░" * (10 - filled)
+    color      = SUCCESS_COLOR if defeated == total else (WARNING_COLOR if defeated > 0 else BOT_COLOR)
+
+    embed = discord.Embed(
+        title=f"🎛️  Boss Control Panel — {event['event_name']}",
+        description=(
+            f"**{raid_name}**  •  {event.get('event_date', '?')}\n"
+            f"Progress: **{defeated}/{total}**  `{bar}`  {pct:.0f}%\n\n"
+            "Click a button below to toggle **✅ Defeated** / **⚔️ Alive**.\n"
+            "*Changes reflect immediately in the raid channel.*"
+        ),
+        color=color,
+    )
+    embed.set_footer(
+        text=(
+            f"Event ID: {event['event_id']}  •  "
+            f"Only raid leaders & officers can use these buttons"
+            + ("  •  🏆 All clear!" if defeated == total else "")
+        )
     )
     return embed
 

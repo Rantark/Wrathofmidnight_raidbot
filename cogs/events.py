@@ -8,7 +8,7 @@ Commands: /raid create, edit, cancel, list, info, lock,
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
@@ -177,8 +177,66 @@ class SignupView(discord.ui.View):
         await self._handle_signup(interaction, "dps", "declined")
 
 
+# ── Boss control panel (buttons for admin/log channel) ───────────────────────
+
+class BossButton(discord.ui.Button):
+    """Toggle button for a single boss on the admin control panel."""
+
+    def __init__(self, boss: dict, event_id: int) -> None:
+        defeated = bool(boss["defeated"])
+        super().__init__(
+            label=f"{'✅' if defeated else '⚔️'}  {boss['boss_name']}"[:80],
+            style=discord.ButtonStyle.success if defeated else discord.ButtonStyle.secondary,
+            custom_id=f"boss_{event_id}_{boss['sort_order']}",
+        )
+        self.boss_name = boss["boss_name"]
+        self.event_id  = event_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+
+        if not await is_raid_leader(interaction):
+            await interaction.followup.send(
+                embed=embeds.error_embed("Permission Denied", "Only raid leaders can toggle bosses."),
+                ephemeral=True,
+            )
+            return
+
+        boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, self.event_id)
+        current = next((b for b in boss_rows if b["boss_name"] == self.boss_name), None)
+        if not current:
+            return
+
+        new_state = not bool(current["defeated"])
+        await queries.mark_boss(
+            config.DATABASE_PATH, self.event_id, self.boss_name, new_state, interaction.user.id
+        )
+
+        # Refresh the public event embed to reflect new boss state
+        await _refresh_event_embed(self.view.bot, self.event_id)
+
+        # Rebuild this control panel in place
+        event        = await queries.get_event(config.DATABASE_PATH, self.event_id)
+        updated_rows = await queries.get_event_bosses(config.DATABASE_PATH, self.event_id)
+        new_embed    = embeds.build_boss_control_embed(event, updated_rows)
+        new_view     = BossControlView(self.event_id, updated_rows, self.view.bot)
+        await interaction.message.edit(embed=new_embed, view=new_view)
+
+
+class BossControlView(discord.ui.View):
+    """Persistent view of boss toggle buttons posted in the admin/log channel."""
+
+    def __init__(self, event_id: int, boss_rows: list[dict], bot: commands.Bot) -> None:
+        super().__init__(timeout=None)
+        self.event_id = event_id
+        self.bot      = bot
+        # Discord allows max 25 buttons per message (5 rows × 5)
+        for boss in boss_rows[:25]:
+            self.add_item(BossButton(boss, event_id))
+
+
 async def _refresh_event_embed(bot: commands.Bot, event_id: int) -> None:
-    """Fetch fresh signup data and edit the event message in place."""
+    """Fetch fresh signup + boss data and edit the event message in place."""
     event = await queries.get_event(config.DATABASE_PATH, event_id)
     if not event or not event.get("message_id") or not event.get("channel_id"):
         return
@@ -196,10 +254,12 @@ async def _refresh_event_embed(bot: commands.Bot, event_id: int) -> None:
     categorised = queries.categorise_signups(
         all_signups, event["max_tanks"], event["max_healers"], event["max_dps"]
     )
+    boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
     embed = embeds.build_event_embed(
         event, categorised,
         locked=bool(event["locked"]),
-        last_updated=datetime.utcnow(),
+        last_updated=datetime.now(timezone.utc),
+        bosses=boss_rows if boss_rows else None,
     )
     await message.edit(embed=embed)
 
@@ -351,7 +411,7 @@ class Events(commands.Cog):
         fire_times = []
         for label, seconds in REMINDER_INTERVALS.items():
             fire_dt = event_dt - timedelta(seconds=seconds)
-            if fire_dt > datetime.utcnow():
+            if fire_dt > datetime.now(timezone.utc):
                 fire_times.append((fire_dt.isoformat(), label))
         if fire_times:
             await queries.schedule_reminders(config.DATABASE_PATH, event_id, fire_times)
@@ -798,8 +858,8 @@ class Events(commands.Cog):
 
     # ── Boss progress interactive view ────────────────────────────────────────
 
-    async def _refresh_boss_embed(self, event_id: int) -> None:
-        """Re-fetch boss data and edit the live boss-progress message."""
+    async def _refresh_boss_control_panel(self, event_id: int) -> None:
+        """Re-fetch boss data and edit the admin control panel message in place."""
         event = await queries.get_event(config.DATABASE_PATH, event_id)
         if not event or not event.get("boss_message_id") or not event.get("boss_channel_id"):
             return
@@ -811,8 +871,9 @@ class Events(commands.Cog):
         except discord.NotFound:
             return
         boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
-        embed = embeds.build_boss_progress_embed(event, boss_rows)
-        await msg.edit(embed=embed)
+        embed = embeds.build_boss_control_embed(event, boss_rows)
+        view  = BossControlView(event_id, boss_rows, self.bot)
+        await msg.edit(embed=embed, view=view)
 
     # ── /raid bosses set ───────────────────────────────────────────────────────
 
@@ -872,26 +933,65 @@ class Events(commands.Cog):
         expansion = RAID_EXPANSION.get(raid_name, "")
         await queries.set_event_bosses(config.DATABASE_PATH, event_id, raid_name, boss_list)
 
+        # Refresh the public event embed so the boss list appears immediately
+        await _refresh_event_embed(self.bot, event_id)
+
+        # Post (or update) the boss control panel in the log/admin channel
+        settings  = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        log_ch_id = settings.get("log_channel_id")
+        ctrl_ch   = self.bot.get_channel(log_ch_id) if log_ch_id else interaction.channel
+
+        boss_rows    = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
+        ctrl_embed   = embeds.build_boss_control_embed(event, boss_rows)
+        ctrl_view    = BossControlView(event_id, boss_rows, self.bot)
+
+        # If a control panel already exists, edit it; otherwise post a new one
+        posted_to = ctrl_ch
+        if event.get("boss_message_id") and event.get("boss_channel_id"):
+            existing_ch = self.bot.get_channel(event["boss_channel_id"])
+            if existing_ch:
+                try:
+                    existing_msg = await existing_ch.fetch_message(event["boss_message_id"])
+                    await existing_msg.edit(embed=ctrl_embed, view=ctrl_view)
+                    posted_to = existing_ch
+                    existing_msg = None  # sentinel: already updated
+                except discord.NotFound:
+                    existing_msg = None  # will post new below
+            else:
+                existing_msg = None
+        else:
+            existing_msg = "new"  # trigger posting new
+
+        if existing_msg == "new" or (not event.get("boss_message_id") and ctrl_ch):
+            ctrl_msg = await ctrl_ch.send(embed=ctrl_embed, view=ctrl_view)
+            await queries.set_boss_embed(config.DATABASE_PATH, event_id, ctrl_msg.id, ctrl_ch.id)
+            posted_to = ctrl_ch
+
         await interaction.followup.send(
             embed=embeds.success_embed(
                 "Boss List Set",
                 f"**{raid_name}** ({expansion}) — **{len(boss_list)} bosses** assigned to "
                 f"event `{event_id}`.\n\n"
-                f"Use `/raid bosses show` to post the progress tracker, or "
-                f"`/raid bosses mark` to update individual bosses.",
+                f"Boss list is now visible in the event embed.\n"
+                f"Control panel posted in {posted_to.mention if posted_to else 'the admin channel'} "
+                f"— click buttons there to toggle boss status.",
             ),
             ephemeral=True,
         )
 
-        # Refresh live embed if one exists
-        await self._refresh_boss_embed(event_id)
-
     # ── /raid bosses show ──────────────────────────────────────────────────────
 
-    @bosses_group.command(name="show", description="Post the boss progress tracker for an event")
+    @bosses_group.command(name="show", description="(Re)post the boss control panel to the admin/log channel")
     @app_commands.describe(event_id="Event ID")
     async def bosses_show(self, interaction: discord.Interaction, event_id: int) -> None:
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
+
+        if not await is_raid_leader(interaction):
+            await interaction.followup.send(
+                embed=embeds.error_embed("Permission Denied", "Only raid leaders can post the control panel."),
+                ephemeral=True,
+            )
+            return
 
         event = await queries.get_event(config.DATABASE_PATH, event_id)
         if not event or event["guild_id"] != interaction.guild_id:
@@ -902,25 +1002,26 @@ class Events(commands.Cog):
             return
 
         boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
-        embed = embeds.build_boss_progress_embed(event, boss_rows)
+        if not boss_rows:
+            await interaction.followup.send(
+                embed=embeds.error_embed("No Bosses", f"No boss list set for event `{event_id}`. Use `/raid bosses set` first."),
+                ephemeral=True,
+            )
+            return
 
-        # If a boss embed message already exists, edit it; otherwise post new
-        if event.get("boss_message_id") and event.get("boss_channel_id"):
-            ch = self.bot.get_channel(event["boss_channel_id"])
-            if ch:
-                try:
-                    existing = await ch.fetch_message(event["boss_message_id"])
-                    await existing.edit(embed=embed)
-                    await interaction.followup.send(
-                        embed=embeds.success_embed("Progress Updated", "Boss tracker embed refreshed."),
-                        ephemeral=True,
-                    )
-                    return
-                except discord.NotFound:
-                    pass  # Message gone — post a new one
+        ctrl_embed = embeds.build_boss_control_embed(event, boss_rows)
+        ctrl_view  = BossControlView(event_id, boss_rows, self.bot)
 
-        msg = await interaction.followup.send(embed=embed)
-        await queries.set_boss_embed(config.DATABASE_PATH, event_id, msg.id, interaction.channel_id)
+        settings  = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        log_ch_id = settings.get("log_channel_id")
+        ctrl_ch   = self.bot.get_channel(log_ch_id) if log_ch_id else interaction.channel
+
+        ctrl_msg = await ctrl_ch.send(embed=ctrl_embed, view=ctrl_view)
+        await queries.set_boss_embed(config.DATABASE_PATH, event_id, ctrl_msg.id, ctrl_ch.id)
+        await interaction.followup.send(
+            embed=embeds.success_embed("Control Panel Posted", f"Boss control panel posted in {ctrl_ch.mention}."),
+            ephemeral=True,
+        )
 
     # ── /raid bosses mark ──────────────────────────────────────────────────────
 
@@ -982,7 +1083,7 @@ class Events(commands.Cog):
             config.DATABASE_PATH, event_id, boss_name, defeated, interaction.user.id
         )
 
-        status_str = "✅ **Defeated**" if defeated else "❌ **Alive**"
+        status_str = "✅ **Defeated**" if defeated else "⚔️ **Alive**"
         await interaction.followup.send(
             embed=embeds.success_embed(
                 "Boss Updated",
@@ -990,7 +1091,8 @@ class Events(commands.Cog):
             ),
             ephemeral=True,
         )
-        await self._refresh_boss_embed(event_id)
+        await _refresh_event_embed(self.bot, event_id)
+        await self._refresh_boss_control_panel(event_id)
 
     # ── /raid bosses reset ─────────────────────────────────────────────────────
 
@@ -1018,11 +1120,12 @@ class Events(commands.Cog):
         await interaction.followup.send(
             embed=embeds.success_embed(
                 "Progress Reset",
-                f"All bosses for event `{event_id}` have been reset to ❌ Alive.",
+                f"All bosses for event `{event_id}` have been reset to ⚔️ Alive.",
             ),
             ephemeral=True,
         )
-        await self._refresh_boss_embed(event_id)
+        await _refresh_event_embed(self.bot, event_id)
+        await self._refresh_boss_control_panel(event_id)
 
     # ── /raid bosses list ──────────────────────────────────────────────────────
 
@@ -1040,7 +1143,7 @@ class Events(commands.Cog):
             return
 
         boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
-        embed = embeds.build_boss_progress_embed(event, boss_rows)
+        embed = embeds.build_boss_control_embed(event, boss_rows)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ── /raid bosses raids ─────────────────────────────────────────────────────
