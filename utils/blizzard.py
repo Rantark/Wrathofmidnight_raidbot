@@ -71,8 +71,10 @@ class BlizzardClient:
         """Return a valid access token, refreshing if within 60 s of expiry."""
         cached = self._tokens.get(region)
         if cached and time.time() < cached["expires_at"] - 60:
+            print(f"[Blizzard DEBUG] _get_token: reusing cached token for region={region}", flush=True)
             return cached["access_token"]
 
+        print(f"[Blizzard DEBUG] _get_token: fetching new token for region={region}", flush=True)
         url = f"https://{region}.battle.net/oauth/token"
         try:
             async with aiohttp.ClientSession() as session:
@@ -82,13 +84,16 @@ class BlizzardClient:
                     data={"grant_type": "client_credentials"},
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
+                    body = await resp.text()
+                    print(f"[Blizzard DEBUG] _get_token: HTTP {resp.status} response body: {body}", flush=True)
                     if resp.status != 200:
                         log.warning(
                             "Blizzard token request failed: HTTP %d (region=%s)",
                             resp.status, region,
                         )
                         return None
-                    data = await resp.json()
+                    import json as _json
+                    data = _json.loads(body)
                     self._tokens[region] = {
                         "access_token": data["access_token"],
                         "expires_at":   time.time() + data.get("expires_in", 86400),
@@ -97,6 +102,7 @@ class BlizzardClient:
                     return data["access_token"]
         except Exception as exc:
             log.warning("Blizzard token error (region=%s): %s", region, exc)
+            print(f"[Blizzard DEBUG] _get_token: exception: {exc}", flush=True)
             return None
 
     # ── Profile endpoints ─────────────────────────────────────────────────────
@@ -138,6 +144,8 @@ class BlizzardClient:
                 async with session.get(
                     url, params=params, timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:
+                    body = await resp.text()
+                    print(f"[Blizzard DEBUG] get_character: HTTP {resp.status} body: {body[:500]}", flush=True)
                     if resp.status == 404:
                         return None
                     if resp.status != 200:
@@ -146,9 +154,11 @@ class BlizzardClient:
                             resp.status, region, realm, name,
                         )
                         return None
-                    return await resp.json()
+                    import json as _json
+                    return _json.loads(body)
         except Exception as exc:
             log.warning("Blizzard get_character error: %s", exc)
+            print(f"[Blizzard DEBUG] get_character: exception: {exc}", flush=True)
             return None
 
     async def get_character_media(
