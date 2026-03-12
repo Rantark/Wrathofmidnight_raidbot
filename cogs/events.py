@@ -359,6 +359,7 @@ class Events(commands.Cog):
         # Post the embed in the event channel
         empty_signups: dict = {"tanks": [], "healers": [], "dps": [], "bench": [], "tentative": [], "declined": []}
         fake_event = {
+            "event_id": event_id,
             "event_name": name,
             "event_type": validated_type,
             "event_date": parsed_date.strftime("%Y-%m-%d"),
@@ -697,6 +698,7 @@ class Events(commands.Cog):
 
         empty: dict = {"tanks": [], "healers": [], "dps": [], "bench": [], "tentative": [], "declined": []}
         fake_event = {
+            "event_id": event_id,
             "event_name": tmpl["event_name"],
             "event_type": tmpl["event_type"],
             "event_date": parsed_date.strftime("%Y-%m-%d"),
