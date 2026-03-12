@@ -102,7 +102,7 @@ class Characters(commands.Cog):
                 await interaction.followup.send(
                     embed=embeds.error_embed(
                         "Character Not Found",
-                        f"**{name}** on **{realm}-{region.upper()}** was not found in the Armory.\n"
+                        f"**{name}** on **{realm}** was not found in the Armory.\n"
                         "Check the spelling and try again, or register manually (omit `realm`).",
                     ),
                     ephemeral=True,

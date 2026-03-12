@@ -132,6 +132,7 @@ class BlizzardClient:
             "access_token": token,
         }
         log.info("Blizzard character lookup: GET %s (namespace=%s)", url, f"profile-{region}")
+        print(f"[Blizzard DEBUG] GET {url}?namespace=profile-{region}&locale=en_US", flush=True)
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -165,6 +166,7 @@ class BlizzardClient:
         if not token:
             return None
 
+        realm = re.sub(r"-(us|eu|kr|tw)$", "", realm.lower().strip())
         url = (
             f"https://{region}.api.blizzard.com"
             f"/profile/wow/character/{slugify(realm)}/{slugify(name)}/character-media"
