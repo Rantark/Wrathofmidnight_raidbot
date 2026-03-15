@@ -32,7 +32,7 @@ VERSION: str = "1.4.1"
 
 # ── Required ──────────────────────────────────────────────────────────────────
 DISCORD_TOKEN: str = _require("DISCORD_TOKEN")
-GUILD_ID: int = int(_require("GUILD_ID"))
+GUILD_ID: int | None = int(v) if (v := _optional("GUILD_ID")) else None
 
 # ── Optional with defaults ─────────────────────────────────────────────────────
 EVENT_CHANNEL_ID: int | None = int(v) if (v := _optional("EVENT_CHANNEL_ID")) else None

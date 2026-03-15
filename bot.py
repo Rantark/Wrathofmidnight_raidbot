@@ -103,12 +103,10 @@ class RaidBot(commands.Bot):
             except Exception as exc:
                 log.exception("  ✗ Failed to load %s: %s", cog, exc)
 
-        # Sync slash commands to the configured guild for instant availability.
-        # Global sync can take up to an hour; guild sync is immediate.
-        guild = discord.Object(id=config.GUILD_ID)
-        self.tree.copy_global_to(guild=guild)
-        synced = await self.tree.sync(guild=guild)
-        log.info("Synced %d slash commands to guild %d", len(synced), config.GUILD_ID)
+        # Sync slash commands globally so the bot works in any server.
+        # Note: global syncs can take up to an hour to propagate.
+        synced = await self.tree.sync()
+        log.info("Synced %d slash commands globally", len(synced))
 
         # Start background tasks
         self.reminder_loop.start()
@@ -118,7 +116,7 @@ class RaidBot(commands.Bot):
         log.info("=" * 60)
         log.info("Bot online: %s (ID: %s)", self.user, self.user.id)
         log.info("Version:  %s", config.VERSION)
-        log.info("Guild:    %d", config.GUILD_ID)
+        log.info("Guild ID: %s", config.GUILD_ID or "global (no GUILD_ID set)")
         log.info("Database: %s", config.DATABASE_PATH)
         log.info("=" * 60)
         await self.change_presence(
