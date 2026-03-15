@@ -28,7 +28,7 @@ def _optional(key: str, default: str = "") -> str:
 
 
 # ── Version ───────────────────────────────────────────────────────────────────
-VERSION: str = "1.4.1"
+VERSION: str = "1.5.0"
 
 # ── Required ──────────────────────────────────────────────────────────────────
 DISCORD_TOKEN: str = _require("DISCORD_TOKEN")
