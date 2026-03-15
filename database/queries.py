@@ -151,6 +151,15 @@ async def get_user_characters(
     )
 
 
+async def get_all_guild_characters(db_path: str, guild_id: int) -> list[dict]:
+    """Return all characters registered in a guild, sorted by class then name."""
+    return await _fetchall(
+        db_path,
+        "SELECT * FROM characters WHERE guild_id=? ORDER BY char_class, char_name",
+        (guild_id,),
+    )
+
+
 async def get_character(
     db_path: str, discord_id: int, guild_id: int, char_name: str
 ) -> Optional[dict]:

@@ -19,6 +19,14 @@ from utils import raiderio as rio
 from utils.constants import VALID_SPECS, ALL_SPECS, CLASS_COLORS
 from utils.validators import validate_class, validate_spec, validate_ilvl, validate_char_name
 
+
+async def is_officer(interaction: discord.Interaction) -> bool:
+    """Return True if the user is a server admin or has Officer/Raid Leader bot role."""
+    if interaction.user.guild_permissions.administrator:
+        return True
+    role = await queries.get_permission(config.DATABASE_PATH, interaction.guild_id, interaction.user.id)
+    return role in ("officer", "raid_leader")
+
 log = logging.getLogger(__name__)
 
 
@@ -253,7 +261,8 @@ class Characters(commands.Cog):
             embed.set_thumbnail(url=api_avatar_url)
         if data_source:
             embed.set_footer(text=f"✅ Found via {data_source}")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        await interaction.followup.send(embed=embed, ephemeral=False)
 
     @char_group.command(name="main", description="Set your main character")
     @app_commands.describe(name="Name of the character to set as main")
@@ -495,6 +504,58 @@ class Characters(commands.Cog):
         )
         embed = embeds.build_character_list_embed(member.display_name, chars)
         await interaction.followup.send(embed=embed)
+
+    @char_group.command(name="roster", description="List all registered characters in this server (officers only)")
+    async def character_roster(self, interaction: discord.Interaction) -> None:
+        if not await is_officer(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only officers and raid leaders can view the guild roster."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        all_chars = await queries.get_all_guild_characters(config.DATABASE_PATH, interaction.guild_id)
+
+        if not all_chars:
+            await interaction.followup.send(
+                embed=embeds.info_embed("Guild Roster", "No characters have been registered yet."),
+                ephemeral=True,
+            )
+            return
+
+        # Group by class
+        by_class: dict[str, list[dict]] = {}
+        for char in all_chars:
+            by_class.setdefault(char["char_class"], []).append(char)
+
+        embed = discord.Embed(
+            title=f"📋  Guild Character Roster  ({len(all_chars)} characters)",
+            color=0x3498DB,
+        )
+
+        for cls in sorted(by_class.keys()):
+            chars = by_class[cls]
+            color_hex = CLASS_COLORS.get(cls, 0x3498DB)
+            lines = []
+            for char in chars:
+                member = interaction.guild.get_member(char["discord_id"])
+                member_tag = member.mention if member else f"<@{char['discord_id']}>"
+                spec_info = char["main_spec"]
+                if char.get("off_spec"):
+                    spec_info += f" / {char['off_spec']}"
+                ilvl_tag = f" · {char['ilvl']} ilvl" if char.get("ilvl") else ""
+                main_tag = " ⭐" if char.get("is_main") else ""
+                lines.append(f"**{char['char_name']}**{main_tag} — {spec_info}{ilvl_tag} ({member_tag})")
+
+            embed.add_field(
+                name=f"{cls}  ({len(chars)})",
+                value="\n".join(lines),
+                inline=False,
+            )
+
+        embed.set_footer(text="⭐ = main character")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
