@@ -7,7 +7,6 @@ Commands: /raid create, edit, cancel, list, info, lock,
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -722,15 +721,12 @@ class Events(commands.Cog):
                             color=0xE74C3C,
                         )
                         await msg.edit(embed=cancelled_embed, view=None)
-
-                        async def _delete_after_24h(m: discord.Message) -> None:
-                            await asyncio.sleep(86400)
-                            try:
-                                await m.delete()
-                            except discord.NotFound:
-                                pass
-
-                        asyncio.create_task(_delete_after_24h(msg))
+                        delete_at = (
+                            datetime.now(timezone.utc) + timedelta(hours=24)
+                        ).isoformat()
+                        await queries.add_scheduled_deletion(
+                            config.DATABASE_PATH, channel.id, msg.id, delete_at
+                        )
                     else:
                         # No reason — delete immediately
                         await msg.delete()

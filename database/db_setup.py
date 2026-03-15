@@ -150,6 +150,15 @@ CREATE TABLE IF NOT EXISTS event_channels (
     PRIMARY KEY (guild_id, channel_id)
 );
 
+-- ── Scheduled message deletions ─────────────────────────────────────────────
+-- Used to delete cancelled-event messages after a delay (survives restarts).
+CREATE TABLE IF NOT EXISTS scheduled_deletions (
+    deletion_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id   INTEGER NOT NULL,
+    message_id   INTEGER NOT NULL,
+    delete_at    TEXT    NOT NULL   -- ISO-8601 UTC timestamp
+);
+
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_event_bosses_event   ON event_bosses(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_channels_guild ON event_channels(guild_id);

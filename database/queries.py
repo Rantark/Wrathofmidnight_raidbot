@@ -705,6 +705,37 @@ async def clear_boss_progress(db_path: str, event_id: int) -> None:
     )
 
 
+# ── Scheduled deletions ───────────────────────────────────────────────────────
+
+async def add_scheduled_deletion(
+    db_path: str, channel_id: int, message_id: int, delete_at: str
+) -> None:
+    """Persist a message to be deleted at delete_at (ISO-8601 UTC)."""
+    await _execute(
+        db_path,
+        "INSERT INTO scheduled_deletions (channel_id, message_id, delete_at) VALUES (?, ?, ?)",
+        (channel_id, message_id, delete_at),
+    )
+
+
+async def get_due_deletions(db_path: str) -> list[dict]:
+    """Return all scheduled deletions whose delete_at time has passed."""
+    return await _fetchall(
+        db_path,
+        "SELECT * FROM scheduled_deletions WHERE delete_at <= ?",
+        (_now(),),
+    )
+
+
+async def remove_scheduled_deletion(db_path: str, deletion_id: int) -> None:
+    """Remove a completed (or failed) scheduled deletion record."""
+    await _execute(
+        db_path,
+        "DELETE FROM scheduled_deletions WHERE deletion_id = ?",
+        (deletion_id,),
+    )
+
+
 async def set_boss_embed(
     db_path: str, event_id: int, message_id: int, channel_id: int
 ) -> None:

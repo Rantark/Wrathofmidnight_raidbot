@@ -143,6 +143,7 @@ class RaidBot(commands.Bot):
         # Start background tasks
         self.reminder_loop.start()
         self.auto_archive_loop.start()
+        self.deletion_loop.start()
 
     async def on_ready(self) -> None:
         log.info("=" * 60)
@@ -274,12 +275,39 @@ class RaidBot(commands.Bot):
     async def before_archive_loop(self) -> None:
         await self.wait_until_ready()
 
+    @tasks.loop(minutes=1)
+    async def deletion_loop(self) -> None:
+        """Delete messages that were scheduled for deferred removal (e.g. cancelled events)."""
+        try:
+            due = await queries.get_due_deletions(config.DATABASE_PATH)
+            for row in due:
+                try:
+                    channel = self.get_channel(row["channel_id"])
+                    if channel is None:
+                        channel = await self.fetch_channel(row["channel_id"])
+                    msg = await channel.fetch_message(row["message_id"])
+                    await msg.delete()
+                    log.info("Deleted scheduled message %d in channel %d", row["message_id"], row["channel_id"])
+                except (discord.NotFound, discord.Forbidden):
+                    pass  # Already gone or no permission – still clean up the record
+                except Exception:
+                    log.exception("Error deleting scheduled message %d", row["message_id"])
+                finally:
+                    await queries.remove_scheduled_deletion(config.DATABASE_PATH, row["deletion_id"])
+        except Exception:
+            log.exception("Error in deletion loop")
+
+    @deletion_loop.before_loop
+    async def before_deletion_loop(self) -> None:
+        await self.wait_until_ready()
+
     # ── Graceful shutdown ──────────────────────────────────────────────────────
 
     async def close(self) -> None:
         log.info("Shutting down gracefully…")
         self.reminder_loop.cancel()
         self.auto_archive_loop.cancel()
+        self.deletion_loop.cancel()
         await super().close()
 
     # ── Update & Restart ───────────────────────────────────────────────────────
