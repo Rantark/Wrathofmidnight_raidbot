@@ -7,6 +7,7 @@ Commands: /raid create, edit, cancel, list, info, lock,
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -707,18 +708,32 @@ class Events(commands.Cog):
 
         await queries.cancel_event(config.DATABASE_PATH, event_id)
 
-        # Edit the embed to show cancelled
+        # Handle the event message based on whether a reason was provided
         if event.get("message_id") and event.get("channel_id"):
             channel = self.bot.get_channel(event["channel_id"])
             if channel:
                 try:
                     msg = await channel.fetch_message(event["message_id"])
-                    cancelled_embed = discord.Embed(
-                        title=f"❌  CANCELLED: {event['event_name']}",
-                        description=f"This event has been cancelled." + (f"\n\n**Reason:** {reason}" if reason else ""),
-                        color=0xE74C3C,
-                    )
-                    await msg.edit(embed=cancelled_embed, view=None)
+                    if reason:
+                        # Show cancellation reason for 24 hours then delete
+                        cancelled_embed = discord.Embed(
+                            title=f"❌  CANCELLED: {event['event_name']}",
+                            description=f"This event has been cancelled.\n\n**Reason:** {reason}",
+                            color=0xE74C3C,
+                        )
+                        await msg.edit(embed=cancelled_embed, view=None)
+
+                        async def _delete_after_24h(m: discord.Message) -> None:
+                            await asyncio.sleep(86400)
+                            try:
+                                await m.delete()
+                            except discord.NotFound:
+                                pass
+
+                        asyncio.create_task(_delete_after_24h(msg))
+                    else:
+                        # No reason — delete immediately
+                        await msg.delete()
                 except discord.NotFound:
                     pass
 
