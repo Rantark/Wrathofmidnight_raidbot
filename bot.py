@@ -21,6 +21,35 @@ import config
 from database.db_setup import init_db
 from database import queries
 
+
+def _persist_guild_id(guild_id: int) -> None:
+    """Add guild_id to GUILD_IDS in .env if not already present (no restart needed)."""
+    env_path = pathlib.Path(".env")
+    if not env_path.exists():
+        return
+
+    lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    new_lines = []
+    found = False
+    for line in lines:
+        if line.startswith("GUILD_IDS="):
+            found = True
+            current = line.strip().removeprefix("GUILD_IDS=")
+            ids = [g.strip() for g in current.split(",") if g.strip()]
+            if str(guild_id) not in ids:
+                ids.append(str(guild_id))
+            new_lines.append(f"GUILD_IDS={','.join(ids)}\n")
+        else:
+            new_lines.append(line)
+
+    if not found:
+        new_lines.append(f"GUILD_IDS={guild_id}\n")
+
+    env_path.write_text("".join(new_lines), encoding="utf-8")
+    # Update the live config so the next startup loop already has it
+    if guild_id not in config.GUILD_IDS:
+        config.GUILD_IDS.append(guild_id)
+
 # ── Logging setup ─────────────────────────────────────────────────────────────
 
 def setup_logging() -> None:
@@ -130,6 +159,16 @@ class RaidBot(commands.Bot):
                 name=f"the raid calendar 📅  v{config.VERSION}",
             )
         )
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        """When invited to a new server: sync commands instantly and save the guild ID."""
+        log.info("Joined new guild: %s (%d) — syncing commands", guild.name, guild.id)
+        guild_obj = discord.Object(id=guild.id)
+        self.tree.copy_global_to(guild=guild_obj)
+        synced = await self.tree.sync(guild=guild_obj)
+        log.info("Synced %d commands to new guild %d", len(synced), guild.id)
+        _persist_guild_id(guild.id)
+        log.info("Saved guild %d to .env GUILD_IDS", guild.id)
 
     async def on_app_command_error(
         self,
