@@ -39,14 +39,34 @@ async def is_raid_leader(interaction: discord.Interaction) -> bool:
 
 # ── Sign-up view (buttons attached to event embeds) ──────────────────────────
 
+class _RoleButton(discord.ui.Button):
+    """A single role-signup button that carries its own role/status metadata."""
+
+    def __init__(self, role: str, signup_status: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.role          = role
+        self.signup_status = signup_status
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.view._handle_signup(interaction, self.role, self.signup_status)
+
+
 class SignupView(discord.ui.View):
     """Persistent button view for raid event signups."""
 
     def __init__(self, event_id: int, bot: commands.Bot) -> None:
         super().__init__(timeout=None)
         self.event_id = event_id
-        self.bot = bot
-        self.custom_id_prefix = f"signup_{event_id}"
+        self.bot      = bot
+
+        # Each button carries the event_id in its custom_id so multiple concurrent
+        # events never share custom_ids and each view routes correctly.
+        eid = event_id
+        self.add_item(_RoleButton("tank",   "confirmed", label="Tank 🛡️",      style=discord.ButtonStyle.primary,   custom_id=f"signup_{eid}_tank"))
+        self.add_item(_RoleButton("healer", "confirmed", label="Healer 💚",    style=discord.ButtonStyle.success,   custom_id=f"signup_{eid}_healer"))
+        self.add_item(_RoleButton("dps",    "confirmed", label="DPS ⚔️",       style=discord.ButtonStyle.secondary, custom_id=f"signup_{eid}_dps"))
+        self.add_item(_RoleButton("dps",    "tentative", label="Tentative ❓", style=discord.ButtonStyle.secondary, custom_id=f"signup_{eid}_tentative"))
+        self.add_item(_RoleButton("dps",    "declined",  label="Decline ❌",   style=discord.ButtonStyle.danger,    custom_id=f"signup_{eid}_decline"))
 
     async def _handle_signup(
         self,
@@ -156,28 +176,19 @@ class SignupView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="Tank 🛡️",      style=discord.ButtonStyle.primary,  custom_id="signup_tank")
-    async def tank(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._handle_signup(interaction, "tank", "confirmed")
-
-    @discord.ui.button(label="Healer 💚",    style=discord.ButtonStyle.success,  custom_id="signup_healer")
-    async def healer(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._handle_signup(interaction, "healer", "confirmed")
-
-    @discord.ui.button(label="DPS ⚔️",       style=discord.ButtonStyle.secondary, custom_id="signup_dps")
-    async def dps(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._handle_signup(interaction, "dps", "confirmed")
-
-    @discord.ui.button(label="Tentative ❓", style=discord.ButtonStyle.secondary, custom_id="signup_tentative")
-    async def tentative(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._handle_signup(interaction, "dps", "tentative")
-
-    @discord.ui.button(label="Decline ❌",   style=discord.ButtonStyle.danger,    custom_id="signup_decline")
-    async def decline(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._handle_signup(interaction, "dps", "declined")
-
 
 # ── Social event view (Attending / Tentative / Decline only) ─────────────────
+
+class _SocialButton(discord.ui.Button):
+    """A single attendance button for social events."""
+
+    def __init__(self, signup_status: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.signup_status = signup_status
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await self.view._handle(interaction, self.signup_status)
+
 
 class SocialSignupView(discord.ui.View):
     """Persistent button view for non-raid events — no role slots."""
@@ -185,7 +196,12 @@ class SocialSignupView(discord.ui.View):
     def __init__(self, event_id: int, bot: commands.Bot) -> None:
         super().__init__(timeout=None)
         self.event_id = event_id
-        self.bot = bot
+        self.bot      = bot
+
+        eid = event_id
+        self.add_item(_SocialButton("confirmed", label="Attending ✅",     style=discord.ButtonStyle.success,   custom_id=f"social_{eid}_attending"))
+        self.add_item(_SocialButton("tentative", label="Tentative ❓",     style=discord.ButtonStyle.secondary, custom_id=f"social_{eid}_tentative"))
+        self.add_item(_SocialButton("declined",  label="Not Attending ❌", style=discord.ButtonStyle.danger,    custom_id=f"social_{eid}_decline"))
 
     async def _handle(self, interaction: discord.Interaction, signup_status: str) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -249,18 +265,6 @@ class SocialSignupView(discord.ui.View):
             embed=embeds.success_embed("Response Updated", status_msg),
             ephemeral=True,
         )
-
-    @discord.ui.button(label="Attending ✅",  style=discord.ButtonStyle.success,   custom_id="social_attending")
-    async def attending(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._handle(interaction, "confirmed")
-
-    @discord.ui.button(label="Tentative ❓",  style=discord.ButtonStyle.secondary,  custom_id="social_tentative")
-    async def tentative(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._handle(interaction, "tentative")
-
-    @discord.ui.button(label="Not Attending ❌", style=discord.ButtonStyle.danger,  custom_id="social_decline")
-    async def decline(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await self._handle(interaction, "declined")
 
 
 # ── Boss control panel ────────────────────────────────────────────────────────
@@ -415,6 +419,17 @@ class Events(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    async def cog_load(self) -> None:
+        """Re-register persistent views for every active event after a bot restart."""
+        active_events = await queries.get_all_active_events(config.DATABASE_PATH)
+        for event in active_events:
+            eid = event["event_id"]
+            if event.get("event_type") in SOCIAL_EVENT_TYPES:
+                self.bot.add_view(SocialSignupView(eid, self.bot))
+            else:
+                self.bot.add_view(SignupView(eid, self.bot))
+        log.info("Re-registered persistent views for %d active event(s)", len(active_events))
 
     # ── /raid ─────────────────────────────────────────────────────────────────
     raid_group = app_commands.Group(name="raid", description="Raid and event management")

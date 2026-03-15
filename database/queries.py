@@ -278,6 +278,14 @@ async def get_upcoming_events(db_path: str, guild_id: int) -> list[dict]:
     )
 
 
+async def get_all_active_events(db_path: str) -> list[dict]:
+    """Return every active event across all guilds (used for view re-registration on startup)."""
+    return await _fetchall(
+        db_path,
+        "SELECT * FROM events WHERE status='active'",
+    )
+
+
 async def update_event(db_path: str, event_id: int, **kwargs: Any) -> None:
     allowed = {"event_name","event_type","event_date","event_time","description",
                "max_tanks","max_healers","max_dps","locked","status"}
