@@ -264,6 +264,169 @@ class Characters(commands.Cog):
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
         await interaction.followup.send(embed=embed, ephemeral=False)
 
+    @char_group.command(name="link", description="Register a character by pasting their Raider.IO profile URL")
+    @app_commands.describe(
+        url="Raider.IO character URL (e.g. https://raider.io/characters/us/stormrage/thrall)",
+        off_spec="Off spec (optional)",
+    )
+    async def character_link(
+        self,
+        interaction: discord.Interaction,
+        url: str,
+        off_spec: Optional[str] = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        parsed = rio.parse_url(url)
+        if parsed is None:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Invalid URL",
+                    "Please provide a valid Raider.IO character URL.\n"
+                    "Example: `https://raider.io/characters/us/stormrage/thrall`",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        region, realm, name = parsed
+
+        await interaction.followup.send(
+            embed=embeds.info_embed("🔍 Looking up character…", f"Checking Raider.IO and Blizzard Armory for **{name.capitalize()}**–{realm}…"),
+            ephemeral=True,
+        )
+
+        # ── API lookup: Raider.IO first, Blizzard as fallback ─────────────────
+        char_class:     Optional[str] = None
+        main_spec:      Optional[str] = None
+        api_race:       Optional[str] = None
+        api_faction:    Optional[str] = None
+        api_avatar_url: Optional[str] = None
+        api_ilvl:       Optional[int] = None
+        data_source:    Optional[str] = None
+
+        rio_data = await rio.client.get_character(region, realm, name)
+        if rio_data is not None:
+            data_source    = "Raider.IO"
+            char_class     = rio_data.get("class")
+            main_spec      = rio_data.get("active_spec_name")
+            api_ilvl       = (rio_data.get("gear") or {}).get("item_level_equipped") or None
+            api_race       = rio_data.get("race")
+            api_avatar_url = rio_data.get("thumbnail_url")
+        else:
+            bnet_client = bnet.get_client()
+            if bnet_client:
+                bnet_data = await bnet_client.get_character(region, realm, name)
+                if bnet_data is not None:
+                    data_source  = "Blizzard Armory"
+                    char_class   = bnet_data.get("character_class", {}).get("name")
+                    main_spec    = bnet_data.get("active_spec", {}).get("name")
+                    api_ilvl     = bnet_data.get("average_item_level") or None
+                    api_race     = bnet_data.get("race",    {}).get("name")
+                    api_faction  = bnet_data.get("faction", {}).get("name")
+                    media = await bnet_client.get_character_media(region, realm, name)
+                    if media:
+                        api_avatar_url = bnet_client.extract_avatar_url(media)
+
+        if data_source is None:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Character Not Found",
+                    f"Neither Raider.IO nor the Blizzard Armory could find **{name.capitalize()}** on **{realm}**.\n\n"
+                    "Make sure you have logged into WoW recently and your profile is public on Raider.IO.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # ── Validate class / spec ─────────────────────────────────────────────
+        validated_class = validate_class(char_class) if char_class else None
+        if not validated_class:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Unknown Class",
+                    f"Could not determine a valid class for **{name.capitalize()}** from {data_source}.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        validated_spec = validate_spec(validated_class, main_spec) if main_spec else None
+        if not validated_spec:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Unknown Spec",
+                    f"Could not determine a valid spec for **{name.capitalize()}** from {data_source}.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        validated_off: Optional[str] = None
+        if off_spec:
+            validated_off = validate_spec(validated_class, off_spec)
+            if not validated_off:
+                await interaction.followup.send(
+                    embed=embeds.error_embed(
+                        "Invalid Off-Spec",
+                        f"**{off_spec}** is not valid for {validated_class}.",
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+        # ── Duplicate check ───────────────────────────────────────────────────
+        existing = await queries.get_character(
+            config.DATABASE_PATH, interaction.user.id, interaction.guild_id, name
+        )
+        if existing:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Already Registered",
+                    f"You already have a character named **{name.capitalize()}**. Use `/character update` to change it.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await queries.add_character(
+            config.DATABASE_PATH,
+            interaction.user.id,
+            interaction.guild_id,
+            name.capitalize(),
+            validated_class,
+            validated_spec,
+            validated_off,
+            api_ilvl,
+            race=api_race,
+            realm=realm,
+            region=region,
+            avatar_url=api_avatar_url,
+            faction=api_faction,
+        )
+
+        color = CLASS_COLORS.get(validated_class, 0x3498DB)
+        embed = discord.Embed(
+            title=f"✅  Character Registered: {name.capitalize()}",
+            color=color,
+        )
+        embed.add_field(name="Class",     value=validated_class, inline=True)
+        embed.add_field(name="Main Spec", value=validated_spec,  inline=True)
+        if validated_off:
+            embed.add_field(name="Off Spec",    value=validated_off,  inline=True)
+        if api_ilvl:
+            embed.add_field(name="Item Level",  value=str(api_ilvl),  inline=True)
+        if api_race:
+            embed.add_field(name="Race",        value=api_race,       inline=True)
+        if api_faction:
+            embed.add_field(name="Faction",     value=api_faction,    inline=True)
+        embed.add_field(name="Realm", value=f"{realm.replace('-', ' ').title()} ({region.upper()})", inline=True)
+        if api_avatar_url:
+            embed.set_thumbnail(url=api_avatar_url)
+        embed.set_footer(text=f"✅ Found via {data_source}")
+        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        await interaction.followup.send(embed=embed, ephemeral=False)
+
     @char_group.command(name="main", description="Set your main character")
     @app_commands.describe(name="Name of the character to set as main")
     async def character_main(self, interaction: discord.Interaction, name: str) -> None:

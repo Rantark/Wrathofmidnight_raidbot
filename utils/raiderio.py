@@ -71,5 +71,28 @@ class RaiderIO:
             return None
 
 
+def parse_url(url: str) -> Optional[tuple[str, str, str]]:
+    """
+    Parse a Raider.IO character profile URL into (region, realm_slug, name).
+
+    Accepts URLs like:
+      https://raider.io/characters/us/stormrage/thrall
+      raider.io/characters/eu/silvermoon/arthas
+
+    Returns None if the URL doesn't match the expected format or has an
+    invalid region.
+    """
+    match = re.search(
+        r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
+        url.lower().strip(),
+    )
+    if not match:
+        return None
+    region, realm, name = match.groups()
+    if region not in ("us", "eu", "kr", "tw"):
+        return None
+    return region, realm, name
+
+
 # Module-level singleton
 client = RaiderIO()
