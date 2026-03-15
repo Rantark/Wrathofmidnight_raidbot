@@ -8,6 +8,8 @@ import discord
 from datetime import datetime
 from typing import Any
 
+from utils.constants import SOCIAL_EVENT_TYPES
+
 from utils.constants import (
     CLASS_COLORS, ROLE_EMOJIS,
     BOT_COLOR, ERROR_COLOR, SUCCESS_COLOR, WARNING_COLOR,
@@ -75,10 +77,6 @@ def build_event_embed(
     tentative= signups.get("tentative", [])
     declined = signups.get("declined", [])
 
-    max_tanks   = event.get("max_tanks", 2)
-    max_healers = event.get("max_healers", 5)
-    max_dps     = event.get("max_dps", 13)
-
     def _roster_block(players: list[dict]) -> str:
         if not players:
             return "_None_"
@@ -90,46 +88,83 @@ def build_event_embed(
             )
         return "\n".join(lines)
 
-    def _full_tag(current: int, maximum: int) -> str:
-        return " **– FULL**" if current >= maximum else ""
+    def _names_block(players: list[dict]) -> str:
+        if not players:
+            return "_None_"
+        lines = []
+        for i, p in enumerate(players):
+            prefix = "└─" if i == len(players) - 1 else "├─"
+            lines.append(f"{prefix} **{p['char_name']}**")
+        return "\n".join(lines)
 
-    embed.add_field(
-        name=f"{ROLE_EMOJIS['tank']} Tanks ({len(tanks)}/{max_tanks}){_full_tag(len(tanks), max_tanks)}",
-        value=_roster_block(tanks),
-        inline=False,
-    )
-    embed.add_field(
-        name=f"{ROLE_EMOJIS['healer']} Healers ({len(healers)}/{max_healers}){_full_tag(len(healers), max_healers)}",
-        value=_roster_block(healers),
-        inline=False,
-    )
-    embed.add_field(
-        name=f"{ROLE_EMOJIS['dps']} DPS ({len(dps)}/{max_dps}){_full_tag(len(dps), max_dps)}",
-        value=_roster_block(dps),
-        inline=False,
-    )
+    is_social = event.get("event_type") in SOCIAL_EVENT_TYPES
 
-    if bench:
+    if is_social:
+        # Simple attending / tentative / decline layout — no role caps
+        attending = tanks + healers + dps  # all confirmed signups regardless of role bucket
         embed.add_field(
-            name=f"{ROLE_EMOJIS['bench']} Bench ({len(bench)})",
-            value=_roster_block(bench),
+            name=f"✅ Attending ({len(attending)})",
+            value=_names_block(attending),
+            inline=False,
+        )
+        if tentative:
+            embed.add_field(
+                name=f"{ROLE_EMOJIS['tentative']} Tentative ({len(tentative)})",
+                value=_names_block(tentative),
+                inline=False,
+            )
+        if declined:
+            names = ", ".join(p["char_name"] for p in declined)
+            embed.add_field(
+                name=f"{ROLE_EMOJIS['declined']} Declined ({len(declined)})",
+                value=names,
+                inline=False,
+            )
+    else:
+        max_tanks   = event.get("max_tanks", 2)
+        max_healers = event.get("max_healers", 5)
+        max_dps     = event.get("max_dps", 13)
+
+        def _full_tag(current: int, maximum: int) -> str:
+            return " **– FULL**" if current >= maximum else ""
+
+        embed.add_field(
+            name=f"{ROLE_EMOJIS['tank']} Tanks ({len(tanks)}/{max_tanks}){_full_tag(len(tanks), max_tanks)}",
+            value=_roster_block(tanks),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{ROLE_EMOJIS['healer']} Healers ({len(healers)}/{max_healers}){_full_tag(len(healers), max_healers)}",
+            value=_roster_block(healers),
+            inline=False,
+        )
+        embed.add_field(
+            name=f"{ROLE_EMOJIS['dps']} DPS ({len(dps)}/{max_dps}){_full_tag(len(dps), max_dps)}",
+            value=_roster_block(dps),
             inline=False,
         )
 
-    if tentative:
-        embed.add_field(
-            name=f"{ROLE_EMOJIS['tentative']} Tentative ({len(tentative)})",
-            value=_roster_block(tentative),
-            inline=False,
-        )
+        if bench:
+            embed.add_field(
+                name=f"{ROLE_EMOJIS['bench']} Bench ({len(bench)})",
+                value=_roster_block(bench),
+                inline=False,
+            )
 
-    if declined:
-        names = ", ".join(p["char_name"] for p in declined)
-        embed.add_field(
-            name=f"{ROLE_EMOJIS['declined']} Declined ({len(declined)})",
-            value=names,
-            inline=False,
-        )
+        if tentative:
+            embed.add_field(
+                name=f"{ROLE_EMOJIS['tentative']} Tentative ({len(tentative)})",
+                value=_roster_block(tentative),
+                inline=False,
+            )
+
+        if declined:
+            names = ", ".join(p["char_name"] for p in declined)
+            embed.add_field(
+                name=f"{ROLE_EMOJIS['declined']} Declined ({len(declined)})",
+                value=names,
+                inline=False,
+            )
 
     # ── Boss progress section (if bosses are assigned) ────────────────────────
     if bosses:
@@ -160,7 +195,7 @@ def build_event_embed(
         embed.add_field(name="\u200b", value="\n".join(left_lines)  or "\u200b", inline=True)
         embed.add_field(name="\u200b", value="\n".join(right_lines) or "\u200b", inline=True)
 
-    total = len(tanks) + len(healers) + len(dps) + len(bench) + len(tentative)
+    total = len(tanks) + len(healers) + len(dps) + len(bench) + len(tentative) + len(declined)
     updated_str = f"  •  Last updated: {last_updated.strftime('%b %d %H:%M')}" if last_updated else ""
     embed.set_footer(
         text=f"Event ID: {event['event_id']}  •  Total signups: {total}{updated_str}"

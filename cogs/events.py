@@ -18,7 +18,7 @@ from discord.ext import commands
 import config
 from database import queries
 from utils import embeds
-from utils.constants import EVENT_TYPES, REMINDER_INTERVALS
+from utils.constants import EVENT_TYPES, REMINDER_INTERVALS, SOCIAL_EVENT_TYPES
 from utils.validators import validate_date, validate_time, validate_event_type
 from utils.raids import find_raid, get_bosses, RAID_EXPANSION
 
@@ -177,7 +177,93 @@ class SignupView(discord.ui.View):
         await self._handle_signup(interaction, "dps", "declined")
 
 
-# ── Boss control panel (buttons for admin/log channel) ───────────────────────
+# ── Social event view (Attending / Tentative / Decline only) ─────────────────
+
+class SocialSignupView(discord.ui.View):
+    """Persistent button view for non-raid events — no role slots."""
+
+    def __init__(self, event_id: int, bot: commands.Bot) -> None:
+        super().__init__(timeout=None)
+        self.event_id = event_id
+        self.bot = bot
+
+    async def _handle(self, interaction: discord.Interaction, signup_status: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        event = await queries.get_event(config.DATABASE_PATH, self.event_id)
+        if not event or event["status"] != "active":
+            await interaction.followup.send(
+                embed=embeds.error_embed("Event Unavailable", "This event is no longer active."),
+                ephemeral=True,
+            )
+            return
+
+        if event["locked"] and signup_status not in ("declined",):
+            await interaction.followup.send(
+                embed=embeds.warning_embed(
+                    "Roster Locked",
+                    "This event is locked.  Contact a raid leader to make changes.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        char = await queries.get_main_character(
+            config.DATABASE_PATH, interaction.user.id, interaction.guild_id
+        )
+        if not char and signup_status not in ("declined",):
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "No Character",
+                    "You haven't registered a character yet.  Use `/character add` first.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        char = char or {"char_name": interaction.user.display_name, "char_class": "Unknown", "main_spec": "Unknown"}
+
+        if signup_status == "declined":
+            existing = await queries.get_signup(config.DATABASE_PATH, self.event_id, interaction.user.id)
+            if existing:
+                await queries.update_signup_status(config.DATABASE_PATH, self.event_id, interaction.user.id, "declined")
+            else:
+                await queries.add_signup(
+                    config.DATABASE_PATH, self.event_id, interaction.user.id,
+                    char["char_name"], char["char_class"], char["main_spec"], "dps", "declined",
+                )
+        else:
+            await queries.add_signup(
+                config.DATABASE_PATH, self.event_id, interaction.user.id,
+                char["char_name"], char["char_class"], char["main_spec"], "dps", signup_status,
+            )
+
+        await _refresh_event_embed(self.bot, self.event_id)
+
+        status_msg = {
+            "confirmed": "✅ You are marked as attending!",
+            "tentative": "❓ Marked as tentative.",
+            "declined":  "❌ Marked as not attending.",
+        }.get(signup_status, "Updated.")
+        await interaction.followup.send(
+            embed=embeds.success_embed("Response Updated", status_msg),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Attending ✅",  style=discord.ButtonStyle.success,   custom_id="social_attending")
+    async def attending(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self._handle(interaction, "confirmed")
+
+    @discord.ui.button(label="Tentative ❓",  style=discord.ButtonStyle.secondary,  custom_id="social_tentative")
+    async def tentative(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self._handle(interaction, "tentative")
+
+    @discord.ui.button(label="Not Attending ❌", style=discord.ButtonStyle.danger,  custom_id="social_decline")
+    async def decline(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await self._handle(interaction, "declined")
+
+
+# ── Boss control panel ────────────────────────────────────────────────────────
 
 class BossButton(discord.ui.Button):
     """Toggle button for a single boss on the admin control panel."""
@@ -224,7 +310,7 @@ class BossButton(discord.ui.Button):
 
 
 class BossControlView(discord.ui.View):
-    """Persistent view of boss toggle buttons posted in the admin/log channel."""
+    """Persistent view of boss toggle buttons posted in the event channel."""
 
     def __init__(self, event_id: int, boss_rows: list[dict], bot: commands.Bot) -> None:
         super().__init__(timeout=None)
@@ -255,13 +341,14 @@ async def _refresh_event_embed(bot: commands.Bot, event_id: int) -> None:
         all_signups, event["max_tanks"], event["max_healers"], event["max_dps"]
     )
     boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
+    view = SocialSignupView(event_id, bot) if event.get("event_type") in SOCIAL_EVENT_TYPES else SignupView(event_id, bot)
     embed = embeds.build_event_embed(
         event, categorised,
         locked=bool(event["locked"]),
         last_updated=datetime.now(timezone.utc),
         bosses=boss_rows if boss_rows else None,
     )
-    await message.edit(embed=embed)
+    await message.edit(embed=embed, view=view)
 
 
 # ── Autocomplete helpers ──────────────────────────────────────────────────────
@@ -430,7 +517,7 @@ class Events(commands.Cog):
             "max_dps": max_dps,
         }
         embed = embeds.build_event_embed(fake_event, empty_signups)
-        view = SignupView(event_id, self.bot)
+        view = SocialSignupView(event_id, self.bot) if validated_type in SOCIAL_EVENT_TYPES else SignupView(event_id, self.bot)
         msg = await target_channel.send(embed=embed, view=view)
         await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, target_channel.id)
 
@@ -936,10 +1023,8 @@ class Events(commands.Cog):
         # Refresh the public event embed so the boss list appears immediately
         await _refresh_event_embed(self.bot, event_id)
 
-        # Post (or update) the boss control panel in the log/admin channel
-        settings  = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
-        log_ch_id = settings.get("log_channel_id")
-        ctrl_ch   = self.bot.get_channel(log_ch_id) if log_ch_id else interaction.channel
+        # Post (or update) the boss control panel in the same channel as the event
+        ctrl_ch = self.bot.get_channel(event["channel_id"]) if event.get("channel_id") else interaction.channel
 
         boss_rows    = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
         ctrl_embed   = embeds.build_boss_control_embed(event, boss_rows)
@@ -1012,9 +1097,8 @@ class Events(commands.Cog):
         ctrl_embed = embeds.build_boss_control_embed(event, boss_rows)
         ctrl_view  = BossControlView(event_id, boss_rows, self.bot)
 
-        settings  = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
-        log_ch_id = settings.get("log_channel_id")
-        ctrl_ch   = self.bot.get_channel(log_ch_id) if log_ch_id else interaction.channel
+        # Post in the same channel as the event, not the log channel
+        ctrl_ch = self.bot.get_channel(event["channel_id"]) if event.get("channel_id") else interaction.channel
 
         ctrl_msg = await ctrl_ch.send(embed=ctrl_embed, view=ctrl_view)
         await queries.set_boss_embed(config.DATABASE_PATH, event_id, ctrl_msg.id, ctrl_ch.id)

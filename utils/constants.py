@@ -106,6 +106,15 @@ EVENT_TYPES: List[str] = [
     "Social Event",
 ]
 
+# Event types that use simple Attending/Decline signups instead of role-based
+SOCIAL_EVENT_TYPES: set = {
+    "Social Event",
+    "Achievement Run",
+    "PvP - RBG",
+    "PvP - Arena",
+    "Mythic+ Night",
+}
+
 # ── Attendance Status Labels ──────────────────────────────────────────────────
 ATTENDANCE_STATUSES: List[str] = ["present", "absent", "late", "excused"]
 
