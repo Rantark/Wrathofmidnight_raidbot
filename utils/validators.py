@@ -72,8 +72,8 @@ def validate_ilvl(ilvl: int) -> bool:
 
 
 def validate_char_name(name: str) -> bool:
-    """WoW character names are 2-12 chars, letters only."""
-    return bool(re.match(r"^[A-Za-z]{2,12}$", name))
+    """WoW character names are 2-12 letters; allows accented/special Latin characters."""
+    return bool(re.match(r"^[^\W\d_]{2,12}$", name, re.UNICODE))
 
 
 def validate_percentage(value: int) -> bool:
