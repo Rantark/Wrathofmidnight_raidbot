@@ -32,7 +32,14 @@ VERSION: str = "1.4.1"
 
 # ── Required ──────────────────────────────────────────────────────────────────
 DISCORD_TOKEN: str = _require("DISCORD_TOKEN")
-GUILD_ID: int | None = int(v) if (v := _optional("GUILD_ID")) else None
+# Comma-separated list of guild IDs for instant command syncing (e.g. "123,456,789").
+# Commands are also synced globally, but guild syncs are immediate while global
+# syncs can take up to an hour to propagate.  Leave blank to skip guild syncing.
+GUILD_IDS: list[int] = [
+    int(gid.strip())
+    for gid in _optional("GUILD_IDS", _optional("GUILD_ID")).split(",")
+    if gid.strip()
+]
 
 # ── Optional with defaults ─────────────────────────────────────────────────────
 EVENT_CHANNEL_ID: int | None = int(v) if (v := _optional("EVENT_CHANNEL_ID")) else None
