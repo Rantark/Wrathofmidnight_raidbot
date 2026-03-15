@@ -310,7 +310,7 @@ class BossButton(discord.ui.Button):
 
 
 class BossControlView(discord.ui.View):
-    """Persistent view of boss toggle buttons posted in the event channel."""
+    """Persistent view of boss toggle buttons posted in the log/admin channel."""
 
     def __init__(self, event_id: int, boss_rows: list[dict], bot: commands.Bot) -> None:
         super().__init__(timeout=None)
@@ -379,16 +379,27 @@ async def _resolve_event_channel(
     """
     Resolve the target channel for an event.
     Priority: explicit channel arg → guild default → current channel.
+    Uses fetch_channel() as a fallback so the cache being cold after a
+    restart never causes events to fall through to the wrong channel.
     """
+    async def _get(channel_id: int):
+        ch = bot.get_channel(channel_id)
+        if ch:
+            return ch
+        try:
+            return await bot.fetch_channel(channel_id)
+        except (discord.NotFound, discord.Forbidden):
+            return None
+
     if channel_value:
-        ch = bot.get_channel(int(channel_value))
+        ch = await _get(int(channel_value))
         if ch:
             return ch
 
     settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
     default_id = settings.get("event_channel_id")
     if default_id:
-        ch = bot.get_channel(default_id)
+        ch = await _get(default_id)
         if ch:
             return ch
 
@@ -1023,8 +1034,10 @@ class Events(commands.Cog):
         # Refresh the public event embed so the boss list appears immediately
         await _refresh_event_embed(self.bot, event_id)
 
-        # Post (or update) the boss control panel in the same channel as the event
-        ctrl_ch = self.bot.get_channel(event["channel_id"]) if event.get("channel_id") else interaction.channel
+        # Post (or update) the boss control panel in the log/admin channel
+        settings  = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        log_ch_id = settings.get("log_channel_id")
+        ctrl_ch   = self.bot.get_channel(log_ch_id) if log_ch_id else interaction.channel
 
         boss_rows    = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
         ctrl_embed   = embeds.build_boss_control_embed(event, boss_rows)
@@ -1097,8 +1110,10 @@ class Events(commands.Cog):
         ctrl_embed = embeds.build_boss_control_embed(event, boss_rows)
         ctrl_view  = BossControlView(event_id, boss_rows, self.bot)
 
-        # Post in the same channel as the event, not the log channel
-        ctrl_ch = self.bot.get_channel(event["channel_id"]) if event.get("channel_id") else interaction.channel
+        # Post in the log/admin channel
+        settings  = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        log_ch_id = settings.get("log_channel_id")
+        ctrl_ch   = self.bot.get_channel(log_ch_id) if log_ch_id else interaction.channel
 
         ctrl_msg = await ctrl_ch.send(embed=ctrl_embed, view=ctrl_view)
         await queries.set_boss_embed(config.DATABASE_PATH, event_id, ctrl_msg.id, ctrl_ch.id)
