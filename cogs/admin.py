@@ -25,8 +25,12 @@ from utils.validators import validate_percentage
 log = logging.getLogger(__name__)
 
 
-def is_admin(interaction: discord.Interaction) -> bool:
-    return interaction.user.guild_permissions.administrator
+async def is_admin(interaction: discord.Interaction) -> bool:
+    """Return True if the user is a server administrator or has the Officer bot role."""
+    if interaction.user.guild_permissions.administrator:
+        return True
+    role = await queries.get_permission(config.DATABASE_PATH, interaction.guild_id, interaction.user.id)
+    return role == "officer"
 
 
 class Admin(commands.Cog):
@@ -51,7 +55,7 @@ class Admin(commands.Cog):
         member: discord.Member,
         role: str = "raid_leader",
     ) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can manage bot permissions."),
                 ephemeral=True,
@@ -72,7 +76,7 @@ class Admin(commands.Cog):
     async def remove_raid_leader(
         self, interaction: discord.Interaction, member: discord.Member
     ) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can manage bot permissions."),
                 ephemeral=True,
@@ -92,7 +96,7 @@ class Admin(commands.Cog):
     async def set_event_channel(
         self, interaction: discord.Interaction, channel: discord.TextChannel
     ) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
                 ephemeral=True,
@@ -124,7 +128,7 @@ class Admin(commands.Cog):
         channel: discord.TextChannel,
         label: Optional[str] = None,
     ) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
                 ephemeral=True,
@@ -147,7 +151,7 @@ class Admin(commands.Cog):
     async def remove_event_channel(
         self, interaction: discord.Interaction, channel: discord.TextChannel
     ) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
                 ephemeral=True,
@@ -165,7 +169,7 @@ class Admin(commands.Cog):
 
     @admin_group.command(name="list_event_channels", description="Show all registered event channels")
     async def list_event_channels(self, interaction: discord.Interaction) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can view configuration."),
                 ephemeral=True,
@@ -196,7 +200,7 @@ class Admin(commands.Cog):
     async def set_log_channel(
         self, interaction: discord.Interaction, channel: discord.TextChannel
     ) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
                 ephemeral=True,
@@ -223,7 +227,7 @@ class Admin(commands.Cog):
         healers: int,
         dps: int,
     ) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
                 ephemeral=True,
@@ -255,7 +259,7 @@ class Admin(commands.Cog):
     @admin_group.command(name="attendance_threshold", description="Set the attendance warning threshold")
     @app_commands.describe(percentage="Percentage (0-100) below which members receive warnings")
     async def attendance_threshold(self, interaction: discord.Interaction, percentage: int) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
                 ephemeral=True,
@@ -285,7 +289,7 @@ class Admin(commands.Cog):
 
     @admin_group.command(name="status", description="View bot configuration for this server")
     async def status(self, interaction: discord.Interaction) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can view configuration."),
                 ephemeral=True,
@@ -333,7 +337,7 @@ class Admin(commands.Cog):
 
     @admin_group.command(name="list_permissions", description="Show members with bot permissions")
     async def list_permissions(self, interaction: discord.Interaction) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can view permissions."),
                 ephemeral=True,
@@ -365,7 +369,7 @@ class Admin(commands.Cog):
 
     @admin_group.command(name="export_data", description="Export all guild data as JSON")
     async def export_data(self, interaction: discord.Interaction) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can export data."),
                 ephemeral=True,
@@ -408,7 +412,7 @@ class Admin(commands.Cog):
 
     @admin_group.command(name="sync", description="Sync slash commands to this server (admin only)")
     async def sync_commands(self, interaction: discord.Interaction) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can sync commands."),
                 ephemeral=True,
@@ -428,7 +432,7 @@ class Admin(commands.Cog):
 
     @admin_group.command(name="restart", description="Restart the bot process (admin only)")
     async def restart(self, interaction: discord.Interaction) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can restart the bot."),
                 ephemeral=True,
@@ -449,7 +453,7 @@ class Admin(commands.Cog):
 
     @admin_group.command(name="update", description="Pull latest code from git and restart (admin only)")
     async def update(self, interaction: discord.Interaction) -> None:
-        if not is_admin(interaction):
+        if not await is_admin(interaction):
             await interaction.response.send_message(
                 embed=embeds.error_embed("Permission Denied", "Only server admins can update the bot."),
                 ephemeral=True,

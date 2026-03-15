@@ -916,8 +916,8 @@ The bot uses a four-tier permission system:
 |---|---|---|
 | **Member** | Everyone | Sign up for events, register characters, view own attendance, submit absence requests |
 | **Raid Leader** | Granted via `/admin set_raid_leader` | All member access + create/edit/cancel events, lock rosters, mark attendance, view attendance reports, save/load templates, boss tracking |
-| **Officer** | Granted via `/admin set_raid_leader role:officer` | All Raid Leader access + CSV attendance exports, event absence lists |
-| **Server Admin** | Discord server administrator role | All of the above + all `/admin` configuration commands |
+| **Officer** | Granted via `/admin set_raid_leader role:officer` | All Raid Leader access + CSV attendance exports, event absence lists + all `/admin` configuration commands |
+| **Server Admin** | Discord server administrator role | Full access to everything (same as Officer for bot commands, plus native Discord admin powers) |
 
 > Discord server administrators always have full bot access regardless of bot role assignments.
 
