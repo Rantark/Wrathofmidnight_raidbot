@@ -132,15 +132,13 @@ class RaidBot(commands.Bot):
             except Exception as exc:
                 log.exception("  ✗ Failed to load %s: %s", cog, exc)
 
-        # Sync to specific guilds immediately (instant), then globally for
-        # any other servers the bot is in (can take up to an hour).
+        # Sync to known guilds immediately.  Full sync to all connected guilds
+        # happens in on_ready once self.guilds is populated.
         for gid in config.GUILD_IDS:
             guild = discord.Object(id=gid)
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             log.info("Synced %d slash commands to guild %d", len(synced), gid)
-        global_synced = await self.tree.sync()
-        log.info("Synced %d slash commands globally", len(global_synced))
 
         # Start background tasks
         self.reminder_loop.start()
@@ -150,9 +148,22 @@ class RaidBot(commands.Bot):
         log.info("=" * 60)
         log.info("Bot online: %s (ID: %s)", self.user, self.user.id)
         log.info("Version:  %s", config.VERSION)
-        log.info("Guild IDs: %s", config.GUILD_IDS or "none (global sync only)")
+        log.info("Connected to %d guild(s)", len(self.guilds))
         log.info("Database: %s", config.DATABASE_PATH)
         log.info("=" * 60)
+
+        # Sync commands to every guild the bot is currently in.
+        # Guild syncs are instant and don't count toward Discord's global
+        # command registration rate limit (200/day), so this is safe to run
+        # on every startup without risk of members losing slash command access.
+        known = set(config.GUILD_IDS)
+        for guild in self.guilds:
+            if guild.id not in known:
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                log.info("Synced %d commands to guild %s (%d)", len(synced), guild.name, guild.id)
+                _persist_guild_id(guild.id)
+
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
