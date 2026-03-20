@@ -69,6 +69,7 @@ async def update_guild_setting(db_path: str, guild_id: int, key: str, value: Any
     allowed = {
         "event_channel_id", "log_channel_id", "attendance_threshold",
         "timezone", "default_max_tanks", "default_max_healers", "default_max_dps",
+        "roster_channel_id", "roster_message_id",
     }
     if key not in allowed:
         raise ValueError(f"Unknown setting key: {key}")
@@ -126,6 +127,8 @@ async def add_character(
     region: Optional[str] = None,
     avatar_url: Optional[str] = None,
     faction: Optional[str] = None,
+    professions: Optional[str] = None,
+    progression: Optional[str] = None,
 ) -> None:
     # If this is the user's first character, make it their main automatically
     existing = await get_user_characters(db_path, discord_id, guild_id)
@@ -134,10 +137,12 @@ async def add_character(
         db_path,
         """INSERT INTO characters
            (discord_id, guild_id, char_name, char_class, main_spec, off_spec,
-            is_main, ilvl, race, realm, region, avatar_url, faction)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            is_main, ilvl, race, realm, region, avatar_url, faction,
+            professions, progression)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (discord_id, guild_id, char_name, char_class, main_spec, off_spec,
-         is_main, ilvl, race, realm, region, avatar_url, faction),
+         is_main, ilvl, race, realm, region, avatar_url, faction,
+         professions, progression),
     )
 
 
@@ -203,7 +208,7 @@ async def update_character(
     char_name: str,
     **kwargs: Any,
 ) -> None:
-    allowed = {"main_spec", "off_spec", "ilvl", "notes", "race", "realm", "region", "avatar_url", "faction"}
+    allowed = {"main_spec", "off_spec", "ilvl", "notes", "race", "realm", "region", "avatar_url", "faction", "professions", "progression"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not updates:
         return

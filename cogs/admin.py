@@ -91,6 +91,39 @@ class Admin(commands.Cog):
             ephemeral=True,
         )
 
+    # ── Public Guild Roster ────────────────────────────────────────────────────
+
+    @admin_group.command(
+        name="roster_post",
+        description="Post a live guild roster embed that auto-updates when members register",
+    )
+    @app_commands.describe(channel="Channel where the roster will be posted")
+    async def roster_post(
+        self, interaction: discord.Interaction, channel: discord.TextChannel
+    ) -> None:
+        if not await is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can post the guild roster."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        all_chars = await queries.get_all_guild_characters(config.DATABASE_PATH, interaction.guild_id)
+        embed = embeds.build_guild_roster_embed(all_chars, interaction.guild.name)
+        msg = await channel.send(embed=embed)
+        await queries.update_guild_setting(config.DATABASE_PATH, interaction.guild_id, "roster_channel_id", channel.id)
+        await queries.update_guild_setting(config.DATABASE_PATH, interaction.guild_id, "roster_message_id", msg.id)
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Roster Posted",
+                f"Guild roster posted in {channel.mention}.\n"
+                "It will automatically update whenever members register, update, or remove characters.\n\n"
+                "Pin the message so members can always find it!",
+            ),
+            ephemeral=True,
+        )
+
     # ── Channel configuration ──────────────────────────────────────────────────
 
     @admin_group.command(name="set_event_channel", description="Set the default channel for event postings")

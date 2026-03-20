@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     timezone              TEXT    DEFAULT 'America/New_York',
     default_max_tanks     INTEGER DEFAULT 2,
     default_max_healers   INTEGER DEFAULT 5,
-    default_max_dps       INTEGER DEFAULT 13
+    default_max_dps       INTEGER DEFAULT 13,
+    roster_channel_id     INTEGER,
+    roster_message_id     INTEGER
 );
 
 -- ── Raid leader / officer roles ─────────────────────────────────────────────
@@ -43,6 +45,8 @@ CREATE TABLE IF NOT EXISTS characters (
     is_main     INTEGER NOT NULL DEFAULT 0,
     ilvl        INTEGER,
     notes       TEXT,
+    professions TEXT,
+    progression TEXT,
     PRIMARY KEY (discord_id, guild_id, char_name)
 );
 
@@ -187,6 +191,12 @@ async def init_db(db_path: str) -> None:
             "ALTER TABLE characters ADD COLUMN region     TEXT",
             "ALTER TABLE characters ADD COLUMN avatar_url TEXT",
             "ALTER TABLE characters ADD COLUMN faction    TEXT",
+            # Professions and raid progression per character
+            "ALTER TABLE characters ADD COLUMN professions TEXT",
+            "ALTER TABLE characters ADD COLUMN progression TEXT",
+            # Public roster embed tracking in guild settings
+            "ALTER TABLE guild_settings ADD COLUMN roster_channel_id INTEGER",
+            "ALTER TABLE guild_settings ADD COLUMN roster_message_id INTEGER",
         ]
         for sql in migrations:
             try:

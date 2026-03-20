@@ -268,14 +268,69 @@ def build_character_list_embed(
         return embed
 
     for char in characters:
-        main_tag = " ⭐ **Main**" if char.get("is_main") else ""
-        ilvl_tag = f"  |  iLvl {char['ilvl']}" if char.get("ilvl") else ""
-        off_tag  = f"  |  Off: {char['off_spec']}" if char.get("off_spec") else ""
+        main_tag  = " ⭐ **Main**" if char.get("is_main") else ""
+        ilvl_tag  = f"  |  iLvl {char['ilvl']}" if char.get("ilvl") else ""
+        off_tag   = f"  |  Off: {char['off_spec']}" if char.get("off_spec") else ""
+        prof_tag  = f"\nProfessions: {char['professions']}" if char.get("professions") else ""
+        prog_tag  = f"\nProgression: {char['progression']}" if char.get("progression") else ""
         embed.add_field(
             name=f"{char['char_name']}{main_tag}",
-            value=f"{char['char_class']} – {char['main_spec']}{off_tag}{ilvl_tag}",
+            value=f"{char['char_class']} – {char['main_spec']}{off_tag}{ilvl_tag}{prof_tag}{prog_tag}",
             inline=False,
         )
+    return embed
+
+
+# ── Public Guild Roster embed ─────────────────────────────────────────────────
+
+def build_guild_roster_embed(
+    all_chars: list[dict],
+    guild_name: str = "",
+) -> discord.Embed:
+    """
+    Public-facing roster embed.  Shows class, spec, professions, and progression.
+    Intentionally omits item level to keep things friendly.
+    Auto-updates whenever members register or update their characters.
+    """
+    total = len(all_chars)
+    subtitle = f"**{guild_name}**  |  " if guild_name else ""
+    embed = discord.Embed(
+        title=f"📋  Guild Roster  —  {total} Raider{'s' if total != 1 else ''}",
+        description=f"{subtitle}Use `/character add` to register your character.",
+        color=BOT_COLOR,
+    )
+
+    if not all_chars:
+        embed.description = "No characters registered yet.  Use `/character add` to get started!"
+        embed.set_footer(text="Register your character to appear here!")
+        return embed
+
+    # Group by class
+    by_class: dict[str, list[dict]] = {}
+    for char in all_chars:
+        by_class.setdefault(char["char_class"], []).append(char)
+
+    for cls in sorted(by_class.keys()):
+        chars = by_class[cls]
+        lines: list[str] = []
+        for i, char in enumerate(chars):
+            prefix  = "└─" if i == len(chars) - 1 else "├─"
+            star    = " ⭐" if char.get("is_main") else ""
+            spec    = char["main_spec"]
+            if char.get("off_spec"):
+                spec += f" / {char['off_spec']}"
+            profs   = char.get("professions") or "—"
+            prog    = char.get("progression") or "—"
+            lines.append(f"{prefix} **{char['char_name']}**{star}  {spec}  |  {profs}  |  {prog}")
+        embed.add_field(
+            name=f"**{cls}**  ({len(chars)})",
+            value="\n".join(lines),
+            inline=False,
+        )
+
+    embed.set_footer(
+        text=f"Last updated: {datetime.utcnow().strftime('%b %d, %Y at %H:%M UTC')}  •  ⭐ = main character"
+    )
     return embed
 
 

@@ -29,12 +29,41 @@ async def is_officer(interaction: discord.Interaction) -> bool:
 
 log = logging.getLogger(__name__)
 
+# Primary professions players can pick (up to 2)
+PRIMARY_PROFESSIONS = [
+    "Alchemy", "Blacksmithing", "Enchanting", "Engineering",
+    "Herbalism", "Inscription", "Jewelcrafting", "Leatherworking",
+    "Mining", "Skinning", "Tailoring",
+]
+SECONDARY_PROFESSIONS = ["Cooking", "Fishing"]
+ALL_PROFESSIONS = sorted(PRIMARY_PROFESSIONS + SECONDARY_PROFESSIONS)
+
 
 class Characters(commands.Cog):
     """Commands for registering and managing WoW characters."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+
+    async def _refresh_roster_embed(self, guild_id: int) -> None:
+        """Edit the pinned public roster embed if one has been posted."""
+        settings = await queries.get_guild_settings(config.DATABASE_PATH, guild_id)
+        channel_id  = settings.get("roster_channel_id")
+        message_id  = settings.get("roster_message_id")
+        if not channel_id or not message_id:
+            return
+        channel = self.bot.get_channel(channel_id)
+        if not channel:
+            return
+        try:
+            msg = await channel.fetch_message(message_id)
+            all_chars = await queries.get_all_guild_characters(config.DATABASE_PATH, guild_id)
+            embed = embeds.build_guild_roster_embed(all_chars)
+            await msg.edit(embed=embed)
+        except discord.NotFound:
+            pass
+        except Exception as exc:
+            log.warning("Could not refresh guild roster embed: %s", exc)
 
     # ── /character ────────────────────────────────────────────────────────────
     char_group = app_commands.Group(name="character", description="Manage your WoW characters")
@@ -48,6 +77,8 @@ class Characters(commands.Cog):
         main_spec="Main spec — required if no realm, optional override with realm",
         off_spec="Off spec (optional)",
         ilvl="Item level — auto-filled from Armory if realm provided",
+        professions="Your professions, comma-separated (e.g. Alchemy, Herbalism)",
+        progression="Current raid progression (e.g. 8/8 M, 4/8 H Nerub-ar Palace)",
     )
     async def character_add(
         self,
@@ -59,6 +90,8 @@ class Characters(commands.Cog):
         main_spec: Optional[str] = None,
         off_spec: Optional[str] = None,
         ilvl: Optional[int] = None,
+        professions: Optional[str] = None,
+        progression: Optional[str] = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -238,6 +271,8 @@ class Characters(commands.Cog):
             region=region if realm else None,
             avatar_url=api_avatar_url,
             faction=api_faction,
+            professions=professions,
+            progression=progression,
         )
 
         color = CLASS_COLORS.get(validated_class, 0x3498DB)
@@ -257,23 +292,32 @@ class Characters(commands.Cog):
             embed.add_field(name="Faction", value=api_faction, inline=True)
         if realm:
             embed.add_field(name="Realm",   value=f"{realm.title()} ({region.upper()})", inline=True)
+        if professions:
+            embed.add_field(name="Professions", value=professions, inline=True)
+        if progression:
+            embed.add_field(name="Progression", value=progression, inline=True)
         if api_avatar_url:
             embed.set_thumbnail(url=api_avatar_url)
         if data_source:
             embed.set_footer(text=f"✅ Found via {data_source}")
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
         await interaction.followup.send(embed=embed, ephemeral=False)
+        await self._refresh_roster_embed(interaction.guild_id)
 
     @char_group.command(name="link", description="Register a character by pasting their Raider.IO profile URL")
     @app_commands.describe(
         url="Raider.IO character URL (e.g. https://raider.io/characters/us/stormrage/thrall)",
         off_spec="Off spec (optional)",
+        professions="Your professions, comma-separated (e.g. Alchemy, Herbalism)",
+        progression="Current raid progression (e.g. 8/8 M, 4/8 H Nerub-ar Palace)",
     )
     async def character_link(
         self,
         interaction: discord.Interaction,
         url: str,
         off_spec: Optional[str] = None,
+        professions: Optional[str] = None,
+        progression: Optional[str] = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -403,6 +447,8 @@ class Characters(commands.Cog):
             region=region,
             avatar_url=api_avatar_url,
             faction=api_faction,
+            professions=professions,
+            progression=progression,
         )
 
         color = CLASS_COLORS.get(validated_class, 0x3498DB)
@@ -421,11 +467,16 @@ class Characters(commands.Cog):
         if api_faction:
             embed.add_field(name="Faction",     value=api_faction,    inline=True)
         embed.add_field(name="Realm", value=f"{realm.replace('-', ' ').title()} ({region.upper()})", inline=True)
+        if professions:
+            embed.add_field(name="Professions", value=professions, inline=True)
+        if progression:
+            embed.add_field(name="Progression", value=progression, inline=True)
         if api_avatar_url:
             embed.set_thumbnail(url=api_avatar_url)
         embed.set_footer(text=f"✅ Found via {data_source}")
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
         await interaction.followup.send(embed=embed, ephemeral=False)
+        await self._refresh_roster_embed(interaction.guild_id)
 
     @char_group.command(name="main", description="Set your main character")
     @app_commands.describe(name="Name of the character to set as main")
@@ -447,6 +498,7 @@ class Characters(commands.Cog):
             embed=embeds.success_embed("Main Updated", f"**{char['char_name']}** is now your main character."),
             ephemeral=True,
         )
+        await self._refresh_roster_embed(interaction.guild_id)
 
     @char_group.command(name="list", description="View your registered characters")
     async def character_list(self, interaction: discord.Interaction) -> None:
@@ -463,6 +515,8 @@ class Characters(commands.Cog):
         spec="New main spec",
         off_spec="New off spec",
         ilvl="New item level",
+        professions="Your professions, comma-separated (e.g. Alchemy, Herbalism)",
+        progression="Current raid progression (e.g. 8/8 M, 4/8 H Nerub-ar Palace)",
     )
     async def character_update(
         self,
@@ -471,6 +525,8 @@ class Characters(commands.Cog):
         spec: Optional[str] = None,
         off_spec: Optional[str] = None,
         ilvl: Optional[int] = None,
+        professions: Optional[str] = None,
+        progression: Optional[str] = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         char = await queries.get_character(
@@ -516,6 +572,10 @@ class Characters(commands.Cog):
                 )
                 return
             updates["ilvl"] = ilvl
+        if professions is not None:
+            updates["professions"] = professions
+        if progression is not None:
+            updates["progression"] = progression
 
         if not updates:
             await interaction.followup.send(
@@ -531,6 +591,42 @@ class Characters(commands.Cog):
             embed=embeds.success_embed("Character Updated", f"**{char['char_name']}** has been updated."),
             ephemeral=True,
         )
+        await self._refresh_roster_embed(interaction.guild_id)
+
+    @char_group.command(name="progression", description="Set your raid progression for a character")
+    @app_commands.describe(
+        name="Character name",
+        progression="Current raid progression (e.g. 8/8 M, 4/8 H Nerub-ar Palace)",
+    )
+    async def character_progression(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        progression: str,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        char = await queries.get_character(
+            config.DATABASE_PATH, interaction.user.id, interaction.guild_id, name
+        )
+        if not char:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No character named **{name}** found."),
+                ephemeral=True,
+            )
+            return
+
+        await queries.update_character(
+            config.DATABASE_PATH, interaction.user.id, interaction.guild_id, name,
+            progression=progression,
+        )
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Progression Updated",
+                f"**{char['char_name']}**'s progression set to **{progression}**.",
+            ),
+            ephemeral=True,
+        )
+        await self._refresh_roster_embed(interaction.guild_id)
 
     @char_group.command(name="sync", description="Re-sync a character's class/spec/ilvl from Raider.IO or the Blizzard Armory")
     @app_commands.describe(name="Character name to sync")
@@ -655,6 +751,7 @@ class Characters(commands.Cog):
             embed=embeds.success_embed("Character Removed", f"**{char['char_name']}** has been removed."),
             ephemeral=True,
         )
+        await self._refresh_roster_embed(interaction.guild_id)
 
     @char_group.command(name="info", description="View another member's characters")
     @app_commands.describe(member="Discord member to look up")
