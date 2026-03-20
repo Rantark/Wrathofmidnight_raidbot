@@ -285,6 +285,46 @@ class Admin(commands.Cog):
             ephemeral=True,
         )
 
+    # ── Timezone ───────────────────────────────────────────────────────────────
+
+    @admin_group.command(name="timezone", description="Set the timezone used for event times")
+    @app_commands.describe(timezone="IANA timezone name (e.g. America/New_York, America/Chicago, Europe/London)")
+    async def set_timezone(self, interaction: discord.Interaction, timezone: str) -> None:
+        if not await is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can configure the bot."),
+                ephemeral=True,
+            )
+            return
+
+        import pytz
+        try:
+            pytz.timezone(timezone)
+        except pytz.exceptions.UnknownTimeZoneError:
+            await interaction.response.send_message(
+                embed=embeds.error_embed(
+                    "Invalid Timezone",
+                    f"**{timezone}** is not a recognised IANA timezone.\n\n"
+                    "Common examples:\n"
+                    "`America/New_York` · `America/Chicago` · `America/Denver`\n"
+                    "`America/Los_Angeles` · `Europe/London` · `Europe/Paris`\n"
+                    "`Asia/Tokyo` · `Australia/Sydney`",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        await queries.update_guild_setting(config.DATABASE_PATH, interaction.guild_id, "timezone", timezone)
+        await interaction.response.send_message(
+            embed=embeds.success_embed(
+                "Timezone Updated",
+                f"Server timezone is now **{timezone}**.\n"
+                "All future event times will be displayed and scheduled in this timezone.",
+            ),
+            ephemeral=True,
+        )
+
     # ── Status overview ────────────────────────────────────────────────────────
 
     @admin_group.command(name="status", description="View bot configuration for this server")

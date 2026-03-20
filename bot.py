@@ -242,8 +242,18 @@ class RaidBot(commands.Bot):
         all_signups = await queries.get_event_signups(config.DATABASE_PATH, event["event_id"])
         signed_up = sum(1 for s in all_signups if s["signup_status"] in ("confirmed", "bench"))
 
+        guild_settings = await queries.get_guild_settings(config.DATABASE_PATH, event["guild_id"])
+        tz_name = guild_settings.get("timezone") or config.TIMEZONE or "America/New_York"
+        import pytz
+        try:
+            tz = pytz.timezone(tz_name)
+            naive_dt = datetime.strptime(f"{event['event_date']} {event['event_time']}", "%Y-%m-%d %H:%M")
+            tz_abbrev = tz.localize(naive_dt).strftime("%Z")
+        except Exception:
+            tz_abbrev = ""
+
         from utils.embeds import build_reminder_embed
-        embed = build_reminder_embed(event, time_label, signed_up)
+        embed = build_reminder_embed(event, time_label, signed_up, tz_label=tz_abbrev)
 
         ping = "@here " if reminder["label"] == "5m" else ""
         await channel.send(f"{ping}", embed=embed)

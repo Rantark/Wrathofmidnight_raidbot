@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
+import pytz
 from discord import app_commands
 from discord.ext import commands
 
@@ -23,6 +24,24 @@ from utils.validators import validate_date, validate_time, validate_event_type
 from utils.raids import find_raid, get_bosses, RAID_EXPANSION
 
 log = logging.getLogger(__name__)
+
+
+def _get_guild_tz(tz_name: str) -> pytz.BaseTzInfo:
+    """Return a pytz timezone, falling back to America/New_York on invalid names."""
+    try:
+        return pytz.timezone(tz_name)
+    except pytz.exceptions.UnknownTimeZoneError:
+        return pytz.timezone("America/New_York")
+
+
+def _tz_abbrev(tz_name: str, event_date: str, event_time: str) -> str:
+    """Return the timezone abbreviation (e.g. 'EST', 'CDT') for the given event datetime."""
+    try:
+        tz = pytz.timezone(tz_name)
+        dt = datetime.strptime(f"{event_date} {event_time}", "%Y-%m-%d %H:%M")
+        return tz.localize(dt).strftime("%Z")
+    except Exception:
+        return ""
 
 
 # ── Permission helper ─────────────────────────────────────────────────────────
@@ -345,12 +364,15 @@ async def _refresh_event_embed(bot: commands.Bot, event_id: int) -> None:
         all_signups, event["max_tanks"], event["max_healers"], event["max_dps"]
     )
     boss_rows = await queries.get_event_bosses(config.DATABASE_PATH, event_id)
+    guild_settings = await queries.get_guild_settings(config.DATABASE_PATH, event["guild_id"])
+    tz_name = guild_settings.get("timezone") or config.TIMEZONE or "America/New_York"
     view = SocialSignupView(event_id, bot) if event.get("event_type") in SOCIAL_EVENT_TYPES else SignupView(event_id, bot)
     embed = embeds.build_event_embed(
         event, categorised,
         locked=bool(event["locked"]),
         last_updated=datetime.now(timezone.utc),
         bosses=boss_rows if boss_rows else None,
+        tz_label=_tz_abbrev(tz_name, event["event_date"], event["event_time"]),
     )
     await message.edit(embed=embed, view=view)
 
@@ -517,10 +539,16 @@ class Events(commands.Cog):
             max_dps,
         )
 
-        # Schedule reminders
-        event_dt = datetime.strptime(
-            f"{parsed_date.strftime('%Y-%m-%d')} {normalised_time}", "%Y-%m-%d %H:%M"
-        ).replace(tzinfo=timezone.utc)
+        # Get guild timezone for accurate reminder scheduling
+        guild_settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        tz_name = guild_settings.get("timezone") or config.TIMEZONE or "America/New_York"
+        guild_tz = _get_guild_tz(tz_name)
+        event_date_str = parsed_date.strftime("%Y-%m-%d")
+
+        # Schedule reminders — interpret event time in the guild's timezone (not UTC)
+        event_dt = guild_tz.localize(
+            datetime.strptime(f"{event_date_str} {normalised_time}", "%Y-%m-%d %H:%M")
+        )
         fire_times = []
         for label, seconds in REMINDER_INTERVALS.items():
             fire_dt = event_dt - timedelta(seconds=seconds)
@@ -535,14 +563,14 @@ class Events(commands.Cog):
             "event_id": event_id,
             "event_name": name,
             "event_type": validated_type,
-            "event_date": parsed_date.strftime("%Y-%m-%d"),
+            "event_date": event_date_str,
             "event_time": normalised_time,
             "description": description or "",
             "max_tanks": max_tanks,
             "max_healers": max_healers,
             "max_dps": max_dps,
         }
-        embed = embeds.build_event_embed(fake_event, empty_signups)
+        embed = embeds.build_event_embed(fake_event, empty_signups, tz_label=_tz_abbrev(tz_name, event_date_str, normalised_time))
         view = SocialSignupView(event_id, self.bot) if validated_type in SOCIAL_EVENT_TYPES else SignupView(event_id, self.bot)
         msg = await target_channel.send(embed=embed, view=view)
         await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, target_channel.id)
@@ -595,8 +623,11 @@ class Events(commands.Cog):
         categorised = queries.categorise_signups(
             all_signups, event["max_tanks"], event["max_healers"], event["max_dps"]
         )
+        guild_settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        tz_name = guild_settings.get("timezone") or config.TIMEZONE or "America/New_York"
         embed = embeds.build_event_embed(
-            event, categorised, locked=bool(event["locked"])
+            event, categorised, locked=bool(event["locked"]),
+            tz_label=_tz_abbrev(tz_name, event["event_date"], event["event_time"]),
         )
         await interaction.followup.send(embed=embed)
 
@@ -880,19 +911,22 @@ class Events(commands.Cog):
             tmpl["max_dps"],
         )
 
+        guild_settings = await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
+        tz_name = guild_settings.get("timezone") or config.TIMEZONE or "America/New_York"
+        tmpl_date_str = parsed_date.strftime("%Y-%m-%d")
         empty: dict = {"tanks": [], "healers": [], "dps": [], "bench": [], "tentative": [], "declined": []}
         fake_event = {
             "event_id": event_id,
             "event_name": tmpl["event_name"],
             "event_type": tmpl["event_type"],
-            "event_date": parsed_date.strftime("%Y-%m-%d"),
+            "event_date": tmpl_date_str,
             "event_time": tmpl["event_time"],
             "description": tmpl["description"] or "",
             "max_tanks": tmpl["max_tanks"],
             "max_healers": tmpl["max_healers"],
             "max_dps": tmpl["max_dps"],
         }
-        embed = embeds.build_event_embed(fake_event, empty)
+        embed = embeds.build_event_embed(fake_event, empty, tz_label=_tz_abbrev(tz_name, tmpl_date_str, tmpl["event_time"]))
         view = SignupView(event_id, self.bot)
         msg = await target_channel.send(embed=embed, view=view)
         await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, target_channel.id)

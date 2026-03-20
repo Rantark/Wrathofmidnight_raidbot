@@ -43,6 +43,7 @@ def build_event_embed(
     locked: bool = False,
     last_updated: datetime | None = None,
     bosses: list[dict] | None = None,
+    tz_label: str = "",
 ) -> discord.Embed:
     """
     Build the main roster embed for an event.
@@ -57,9 +58,10 @@ def build_event_embed(
     )
 
     # Date / time line
+    tz_suffix = f"  {tz_label}" if tz_label else ""
     embed.add_field(
         name="🕐  Date & Time",
-        value=f"{event['event_date']}  @  {event['event_time']}",
+        value=f"{event['event_date']}  @  {event['event_time']}{tz_suffix}",
         inline=True,
     )
     embed.add_field(name="🗂️  Type", value=event["event_type"], inline=True)
@@ -279,12 +281,13 @@ def build_character_list_embed(
 
 # ── Reminder embed ────────────────────────────────────────────────────────────
 
-def build_reminder_embed(event: dict[str, Any], time_label: str, signed_up: int) -> discord.Embed:
+def build_reminder_embed(event: dict[str, Any], time_label: str, signed_up: int, tz_label: str = "") -> discord.Embed:
     embed = discord.Embed(
         title=f"🔔  Raid Reminder: {event['event_name']} – {time_label}",
         color=WARNING_COLOR,
     )
-    embed.add_field(name="Start Time", value=f"{event['event_date']} @ {event['event_time']}", inline=True)
+    tz_suffix = f" {tz_label}" if tz_label else ""
+    embed.add_field(name="Start Time", value=f"{event['event_date']} @ {event['event_time']}{tz_suffix}", inline=True)
     embed.add_field(name="Signed Up",  value=str(signed_up), inline=True)
     embed.description = (
         "Not signed up yet? Click the buttons on the event message!\n"
