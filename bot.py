@@ -132,6 +132,12 @@ class RaidBot(commands.Bot):
             except Exception as exc:
                 log.exception("  ✗ Failed to load %s: %s", cog, exc)
 
+        # Remove any globally-registered commands so they don't appear alongside
+        # the guild-specific ones (which would show every command twice).
+        self.tree.clear_commands(guild=None)
+        await self.tree.sync()
+        log.info("Cleared global slash commands")
+
         # Sync to known guilds immediately.  Full sync to all connected guilds
         # happens in on_ready once self.guilds is populated.
         for gid in config.GUILD_IDS:
