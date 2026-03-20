@@ -14,7 +14,7 @@ from typing import Optional
 import discord
 import pytz
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import config
 from database import queries
@@ -452,6 +452,10 @@ class Events(commands.Cog):
             else:
                 self.bot.add_view(SignupView(eid, self.bot))
         log.info("Re-registered persistent views for %d active event(s)", len(active_events))
+        self.recurring_loop.start()
+
+    async def cog_unload(self) -> None:
+        self.recurring_loop.cancel()
 
     # ── /raid ─────────────────────────────────────────────────────────────────
     raid_group = app_commands.Group(name="raid", description="Raid and event management")
@@ -460,6 +464,9 @@ class Events(commands.Cog):
     )
     bosses_group = app_commands.Group(
         name="bosses", description="Boss progress tracking", parent=raid_group
+    )
+    recurring_group = app_commands.Group(
+        name="recurring", description="Auto-post weekly events from a template", parent=raid_group
     )
 
     @raid_group.command(name="create", description="Create a new raid event")
@@ -987,6 +994,272 @@ class Events(commands.Cog):
             ephemeral=True,
         )
 
+    # ── Recurring events ───────────────────────────────────────────────────────
+
+    _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    @staticmethod
+    def _parse_day(day_str: str) -> Optional[int]:
+        """Convert a weekday name or number (0-6) to an integer. Returns None if invalid."""
+        day_str = day_str.strip().lower()
+        names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        abbrevs = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        if day_str in names:
+            return names.index(day_str)
+        if day_str in abbrevs:
+            return abbrevs.index(day_str)
+        if day_str.isdigit() and 0 <= int(day_str) <= 6:
+            return int(day_str)
+        return None
+
+    @recurring_group.command(name="add", description="Auto-post a weekly event from a template")
+    @app_commands.describe(
+        template_name="Template to use each week",
+        day="Day of the week the raid occurs (e.g. Wednesday)",
+        days_ahead="How many days in advance to post the signup (default 7)",
+        channel="Channel to post in (uses guild default if omitted)",
+    )
+    @app_commands.autocomplete(channel=_event_channel_autocomplete)
+    async def recurring_add(
+        self,
+        interaction: discord.Interaction,
+        template_name: str,
+        day: str,
+        days_ahead: int = 7,
+        channel: Optional[str] = None,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        if not await is_raid_leader(interaction):
+            await interaction.followup.send(
+                embed=embeds.error_embed("Permission Denied", "Only raid leaders can manage recurring events."),
+                ephemeral=True,
+            )
+            return
+
+        tmpl = await queries.get_template(config.DATABASE_PATH, interaction.guild_id, template_name)
+        if not tmpl:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No template named **{template_name}**."),
+                ephemeral=True,
+            )
+            return
+
+        day_int = self._parse_day(day)
+        if day_int is None:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Invalid Day", "Provide a weekday name (e.g. `Wednesday`) or number 0–6."),
+                ephemeral=True,
+            )
+            return
+
+        if days_ahead < 1 or days_ahead > 28:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Invalid days_ahead", "Must be between 1 and 28."),
+                ephemeral=True,
+            )
+            return
+
+        channel_id: Optional[int] = int(channel) if channel else None
+        recurring_id = await queries.add_recurring_event(
+            config.DATABASE_PATH,
+            interaction.guild_id,
+            template_name,
+            day_int,
+            interaction.user.id,
+            channel_id,
+            days_ahead,
+        )
+
+        day_name = self._DAY_NAMES[day_int]
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Recurring Event Added",
+                f"Every **{day_name}** a new **{tmpl['event_name']}** signup will be posted "
+                f"{days_ahead} day(s) in advance.\nID: `{recurring_id}`",
+            ),
+            ephemeral=True,
+        )
+
+    @recurring_group.command(name="list", description="List all recurring event schedules")
+    async def recurring_list(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        rows = await queries.get_recurring_events(config.DATABASE_PATH, interaction.guild_id)
+        if not rows:
+            await interaction.followup.send(
+                embed=embeds.info_embed("No Recurring Events", "None set up yet. Use `/raid recurring add`."),
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(title="🔁  Recurring Events", color=0x3498DB)
+        for r in rows:
+            day_name = self._DAY_NAMES[r["day_of_week"]]
+            status = "✅ Enabled" if r["enabled"] else "⏸️ Paused"
+            last = r["last_posted_date"] or "never"
+            ch = f"<#{r['channel_id']}>" if r["channel_id"] else "guild default"
+            embed.add_field(
+                name=f"[{r['recurring_id']}]  {r['template_name']}  —  {day_name}s",
+                value=f"{status}  |  Post {r['days_advance']}d ahead  |  Channel: {ch}\nLast posted for: {last}",
+                inline=False,
+            )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @recurring_group.command(name="remove", description="Remove a recurring event schedule")
+    @app_commands.describe(recurring_id="ID shown in /raid recurring list")
+    async def recurring_remove(self, interaction: discord.Interaction, recurring_id: int) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        if not await is_raid_leader(interaction):
+            await interaction.followup.send(
+                embed=embeds.error_embed("Permission Denied", "Only raid leaders can manage recurring events."),
+                ephemeral=True,
+            )
+            return
+
+        await queries.remove_recurring_event(config.DATABASE_PATH, interaction.guild_id, recurring_id)
+        await interaction.followup.send(
+            embed=embeds.success_embed("Removed", f"Recurring schedule `{recurring_id}` deleted."),
+            ephemeral=True,
+        )
+
+    @recurring_group.command(name="toggle", description="Pause or resume a recurring event schedule")
+    @app_commands.describe(recurring_id="ID shown in /raid recurring list")
+    async def recurring_toggle(self, interaction: discord.Interaction, recurring_id: int) -> None:
+        await interaction.response.defer(ephemeral=True)
+
+        if not await is_raid_leader(interaction):
+            await interaction.followup.send(
+                embed=embeds.error_embed("Permission Denied", "Only raid leaders can manage recurring events."),
+                ephemeral=True,
+            )
+            return
+
+        rows = await queries.get_recurring_events(config.DATABASE_PATH, interaction.guild_id)
+        target = next((r for r in rows if r["recurring_id"] == recurring_id), None)
+        if not target:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No recurring schedule with ID `{recurring_id}` in this server."),
+                ephemeral=True,
+            )
+            return
+
+        new_enabled = not bool(target["enabled"])
+        await queries.toggle_recurring_event(config.DATABASE_PATH, recurring_id, new_enabled)
+        state = "resumed ✅" if new_enabled else "paused ⏸️"
+        await interaction.followup.send(
+            embed=embeds.success_embed("Updated", f"Recurring schedule `{recurring_id}` has been {state}."),
+            ephemeral=True,
+        )
+
+    # ── Recurring background loop ──────────────────────────────────────────────
+
+    @tasks.loop(hours=24)
+    async def recurring_loop(self) -> None:
+        """Run once a day: auto-create events from recurring schedules."""
+        try:
+            await self._process_recurring_events()
+        except Exception:
+            log.exception("Error in recurring_loop")
+
+    @recurring_loop.before_loop
+    async def before_recurring_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _process_recurring_events(self) -> None:
+        from datetime import date, timedelta as td
+        today = date.today()
+        schedules = await queries.get_all_recurring_events(config.DATABASE_PATH)
+
+        for sched in schedules:
+            # Find the next occurrence of the target weekday from today
+            days_until = (sched["day_of_week"] - today.weekday()) % 7
+            if days_until == 0:
+                days_until = 7  # Never schedule for today itself; always a future date
+            next_event_date = today + td(days=days_until)
+            next_date_str = next_event_date.strftime("%Y-%m-%d")
+
+            # Only post if we're exactly days_advance days away and haven't done so yet
+            if days_until != sched["days_advance"]:
+                continue
+            if sched["last_posted_date"] == next_date_str:
+                continue
+
+            tmpl = await queries.get_template(
+                config.DATABASE_PATH, sched["guild_id"], sched["template_name"]
+            )
+            if not tmpl:
+                log.warning("Recurring %d: template '%s' not found", sched["recurring_id"], sched["template_name"])
+                continue
+
+            guild_settings = await queries.get_guild_settings(config.DATABASE_PATH, sched["guild_id"])
+            tz_name = guild_settings.get("timezone") or config.TIMEZONE or "America/New_York"
+            guild_tz = _get_guild_tz(tz_name)
+
+            # Resolve target channel
+            channel_id = sched["channel_id"] or guild_settings.get("event_channel_id")
+            channel = None
+            if channel_id:
+                channel = self.bot.get_channel(channel_id)
+                if not channel:
+                    try:
+                        channel = await self.bot.fetch_channel(channel_id)
+                    except Exception:
+                        channel = None
+            if not channel:
+                log.warning("Recurring %d: could not resolve channel", sched["recurring_id"])
+                continue
+
+            event_id = await queries.create_event(
+                config.DATABASE_PATH,
+                sched["guild_id"],
+                tmpl["event_name"],
+                tmpl["event_type"],
+                next_date_str,
+                tmpl["event_time"],
+                sched["created_by"],
+                tmpl["description"] or "",
+                channel.id,
+                tmpl["max_tanks"],
+                tmpl["max_healers"],
+                tmpl["max_dps"],
+            )
+
+            # Schedule reminders
+            event_dt = guild_tz.localize(
+                datetime.strptime(f"{next_date_str} {tmpl['event_time']}", "%Y-%m-%d %H:%M")
+            )
+            fire_times = []
+            for label, seconds in REMINDER_INTERVALS.items():
+                fire_dt = event_dt - timedelta(seconds=seconds)
+                if fire_dt > datetime.now(timezone.utc):
+                    fire_times.append((fire_dt.astimezone(timezone.utc).isoformat(), label))
+            if fire_times:
+                await queries.schedule_reminders(config.DATABASE_PATH, event_id, fire_times)
+
+            # Post the embed
+            empty: dict = {"tanks": [], "healers": [], "dps": [], "bench": [], "tentative": [], "declined": []}
+            fake_event = {
+                "event_id": event_id,
+                "event_name": tmpl["event_name"],
+                "event_type": tmpl["event_type"],
+                "event_date": next_date_str,
+                "event_time": tmpl["event_time"],
+                "description": tmpl["description"] or "",
+                "max_tanks": tmpl["max_tanks"],
+                "max_healers": tmpl["max_healers"],
+                "max_dps": tmpl["max_dps"],
+            }
+            tz_label = _tz_abbrev(tz_name, next_date_str, tmpl["event_time"])
+            embed = embeds.build_event_embed(fake_event, empty, tz_label=tz_label)
+            view = SocialSignupView(event_id, self.bot) if tmpl["event_type"] in SOCIAL_EVENT_TYPES else SignupView(event_id, self.bot)
+            msg = await channel.send(embed=embed, view=view)
+            await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, channel.id)
+            await queries.update_recurring_last_posted(config.DATABASE_PATH, sched["recurring_id"], next_date_str)
+            log.info(
+                "Recurring %d: posted '%s' (event %d) for %s in channel %d",
+                sched["recurring_id"], tmpl["event_name"], event_id, next_date_str, channel.id,
+            )
 
     # ── /raid bosses autocomplete ──────────────────────────────────────────────
 

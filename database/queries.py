@@ -756,6 +756,68 @@ async def remove_scheduled_deletion(db_path: str, deletion_id: int) -> None:
     )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Recurring Events
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def add_recurring_event(
+    db_path: str,
+    guild_id: int,
+    template_name: str,
+    day_of_week: int,
+    created_by: int,
+    channel_id: Optional[int] = None,
+    days_advance: int = 7,
+) -> int:
+    return await _execute(
+        db_path,
+        """INSERT INTO recurring_events
+           (guild_id, template_name, day_of_week, channel_id, days_advance, created_by)
+           VALUES (?,?,?,?,?,?)""",
+        (guild_id, template_name, day_of_week, channel_id, days_advance, created_by),
+    )
+
+
+async def get_recurring_events(db_path: str, guild_id: int) -> list[dict]:
+    return await _fetchall(
+        db_path,
+        "SELECT * FROM recurring_events WHERE guild_id=? ORDER BY recurring_id",
+        (guild_id,),
+    )
+
+
+async def get_all_recurring_events(db_path: str) -> list[dict]:
+    """Return every enabled recurring event across all guilds (used by background loop)."""
+    return await _fetchall(
+        db_path,
+        "SELECT * FROM recurring_events WHERE enabled=1",
+    )
+
+
+async def update_recurring_last_posted(db_path: str, recurring_id: int, date_str: str) -> None:
+    await _execute(
+        db_path,
+        "UPDATE recurring_events SET last_posted_date=? WHERE recurring_id=?",
+        (date_str, recurring_id),
+    )
+
+
+async def toggle_recurring_event(db_path: str, recurring_id: int, enabled: bool) -> None:
+    await _execute(
+        db_path,
+        "UPDATE recurring_events SET enabled=? WHERE recurring_id=?",
+        (1 if enabled else 0, recurring_id),
+    )
+
+
+async def remove_recurring_event(db_path: str, guild_id: int, recurring_id: int) -> None:
+    await _execute(
+        db_path,
+        "DELETE FROM recurring_events WHERE recurring_id=? AND guild_id=?",
+        (recurring_id, guild_id),
+    )
+
+
 async def set_boss_embed(
     db_path: str, event_id: int, message_id: int, channel_id: int
 ) -> None:

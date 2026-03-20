@@ -163,6 +163,20 @@ CREATE TABLE IF NOT EXISTS scheduled_deletions (
     delete_at    TEXT    NOT NULL   -- ISO-8601 UTC timestamp
 );
 
+-- ── Recurring events ──────────────────────────────────────────────────────────
+-- Stores schedules that auto-post a new event each week from a template.
+CREATE TABLE IF NOT EXISTS recurring_events (
+    recurring_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id         INTEGER NOT NULL,
+    template_name    TEXT    NOT NULL,
+    day_of_week      INTEGER NOT NULL,  -- 0=Monday … 6=Sunday
+    channel_id       INTEGER,           -- NULL = use guild default
+    days_advance     INTEGER NOT NULL DEFAULT 7,  -- post N days before the event
+    enabled          INTEGER NOT NULL DEFAULT 1,
+    created_by       INTEGER NOT NULL,
+    last_posted_date TEXT    -- YYYY-MM-DD of the event_date last auto-created
+);
+
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_event_bosses_event   ON event_bosses(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_channels_guild ON event_channels(guild_id);
@@ -197,6 +211,7 @@ async def init_db(db_path: str) -> None:
             # Public roster embed tracking in guild settings
             "ALTER TABLE guild_settings ADD COLUMN roster_channel_id INTEGER",
             "ALTER TABLE guild_settings ADD COLUMN roster_message_id INTEGER",
+            "ALTER TABLE recurring_events ADD COLUMN last_posted_date TEXT",
         ]
         for sql in migrations:
             try:
