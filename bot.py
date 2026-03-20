@@ -132,12 +132,6 @@ class RaidBot(commands.Bot):
             except Exception as exc:
                 log.exception("  ✗ Failed to load %s: %s", cog, exc)
 
-        # Remove any globally-registered commands so they don't appear alongside
-        # the guild-specific ones (which would show every command twice).
-        self.tree.clear_commands(guild=None)
-        await self.tree.sync()
-        log.info("Cleared global slash commands")
-
         # Sync to known guilds immediately.  Full sync to all connected guilds
         # happens in on_ready once self.guilds is populated.
         for gid in config.GUILD_IDS:
@@ -145,6 +139,14 @@ class RaidBot(commands.Bot):
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             log.info("Synced %d slash commands to guild %d", len(synced), gid)
+
+        # Clear the global command list AFTER guild syncs so that any stale
+        # globally-registered commands (from a previous deployment) are removed.
+        # copy_global_to already pushed everything to each guild, so doing this
+        # last means the guild registrations are intact.
+        self.tree.clear_commands(guild=None)
+        await self.tree.sync()
+        log.info("Cleared global slash commands (prevents duplicates)")
 
         # Start background tasks
         self.reminder_loop.start()
