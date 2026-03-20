@@ -553,7 +553,8 @@ class Events(commands.Cog):
         for label, seconds in REMINDER_INTERVALS.items():
             fire_dt = event_dt - timedelta(seconds=seconds)
             if fire_dt > datetime.now(timezone.utc):
-                fire_times.append((fire_dt.isoformat(), label))
+                # Always store as UTC so SQLite string comparison works correctly
+                fire_times.append((fire_dt.astimezone(timezone.utc).isoformat(), label))
         if fire_times:
             await queries.schedule_reminders(config.DATABASE_PATH, event_id, fire_times)
 
