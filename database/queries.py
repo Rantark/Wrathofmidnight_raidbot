@@ -625,6 +625,13 @@ async def mark_reminder_sent(db_path: str, reminder_id: int) -> None:
     )
 
 
+async def delete_unsent_reminders(db_path: str, event_id: int) -> None:
+    """Delete all unsent reminders for an event (used when rescheduling)."""
+    await _execute(
+        db_path, "DELETE FROM reminders WHERE event_id=? AND sent=0", (event_id,)
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Event Channels
 # ══════════════════════════════════════════════════════════════════════════════

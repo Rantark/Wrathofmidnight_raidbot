@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 import io
 import logging
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Optional
 
 import discord
+import pytz
 from discord import app_commands
 from discord.ext import commands
 
@@ -297,9 +299,8 @@ class Admin(commands.Cog):
             )
             return
 
-        import pytz
         try:
-            pytz.timezone(timezone)
+            guild_tz = pytz.timezone(timezone)
         except pytz.exceptions.UnknownTimeZoneError:
             await interaction.response.send_message(
                 embed=embeds.error_embed(
@@ -314,13 +315,42 @@ class Admin(commands.Cog):
             )
             return
 
+        await interaction.response.defer(ephemeral=True)
         await queries.get_guild_settings(config.DATABASE_PATH, interaction.guild_id)
         await queries.update_guild_setting(config.DATABASE_PATH, interaction.guild_id, "timezone", timezone)
-        await interaction.response.send_message(
+
+        # Reschedule reminders and refresh embeds for all upcoming active events
+        from utils.constants import REMINDER_INTERVALS
+        from cogs.events import _refresh_event_embed
+
+        upcoming = await queries.get_upcoming_events(config.DATABASE_PATH, interaction.guild_id)
+        refreshed = 0
+        for event in upcoming:
+            # Replace unsent reminders with correctly-offset times
+            await queries.delete_unsent_reminders(config.DATABASE_PATH, event["event_id"])
+            try:
+                event_dt = guild_tz.localize(
+                    datetime.strptime(f"{event['event_date']} {event['event_time']}", "%Y-%m-%d %H:%M")
+                )
+                fire_times = []
+                for label, seconds in REMINDER_INTERVALS.items():
+                    fire_dt = event_dt - timedelta(seconds=seconds)
+                    if fire_dt > datetime.now(dt_timezone.utc):
+                        fire_times.append((fire_dt.isoformat(), label))
+                if fire_times:
+                    await queries.schedule_reminders(config.DATABASE_PATH, event["event_id"], fire_times)
+            except Exception:
+                pass
+
+            # Refresh the Discord embed so it shows the new timezone abbreviation
+            await _refresh_event_embed(self.bot, event["event_id"])
+            refreshed += 1
+
+        detail = f"Updated **{refreshed}** active event(s) — reminders rescheduled and embeds refreshed." if refreshed else "No active events to update."
+        await interaction.followup.send(
             embed=embeds.success_embed(
                 "Timezone Updated",
-                f"Server timezone is now **{timezone}**.\n"
-                "All future event times will be displayed and scheduled in this timezone.",
+                f"Server timezone is now **{timezone}**.\n\n{detail}",
             ),
             ephemeral=True,
         )
