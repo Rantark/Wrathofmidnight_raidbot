@@ -22,6 +22,8 @@ A self-hosted Discord bot for managing World of Warcraft guild raid events, rost
    - [/admin commands](#admin-commands)
    - [/admin character commands](#admin-character-commands)
 10. [Permissions System](#permissions-system)
+11. [Automatic Reminders](#automatic-reminders)
+12. [Auto-Archive & Cleanup](#auto-archive--cleanup)
 11. [Attendance Tracking Guide](#attendance-tracking-guide)
 12. [Event & Signup System Guide](#event--signup-system-guide)
 13. [Boss Progress Tracking](#boss-progress-tracking)
@@ -49,11 +51,12 @@ A self-hosted Discord bot for managing World of Warcraft guild raid events, rost
 | **Boss Progress Tracking** | Set a raid's boss list from a 373-boss database and mark kills live |
 | **Event Templates** | Save a raid as a template and re-use it with a new date in seconds |
 | **Weekly Recurring Events** | Schedule a template to auto-post a signup embed every week without any manual work |
-| **Automatic Reminders** | Channel pings at 24h, 2h, 30m, and 5m before every event |
-| **Auto-Archive** | Completed events are automatically archived 6 hours after they end |
+| **Automatic Reminders** | Channel pings at 24h, 2h, 30m, and 5m before every event; each new reminder replaces the previous one |
+| **Auto-Archive & Cleanup** | Events are archived 4 hours after they end; signup and boss progress embeds are deleted automatically |
+| **Per-Event Colors** | Each signup embed gets a unique accent color so two simultaneous events of the same type are visually distinct |
 | **Multi-Channel Support** | Post events to any combination of channels; per-channel labeling |
-| **Public Guild Roster** | Post a live roster embed that auto-updates as members register characters |
-| **Admin Character Tools** | Admins can list, view, and edit any guild member's character, including Raider.IO links |
+| **Public Guild Roster** | Post a live roster embed that auto-updates as members register characters, including Raider.IO profile links |
+| **Admin Character Tools** | Admins can list, view, edit, bulk Raider.IO sync, and audit characters for departed members |
 | **Auto Guild Registration** | Inviting the bot to a new server instantly syncs commands and saves the guild ID |
 | **Data Export** | Export all guild data (events, signups, characters, attendance) as JSON |
 | **Self-Update** | `/admin update` pulls the latest code from git and restarts the bot |
@@ -1095,6 +1098,49 @@ Edit any field on any guild member's character without needing their cooperation
 
 ---
 
+#### `/admin character sync_raiderio`
+
+Bulk-sync every registered guild character with Raider.IO in one go. The bot contacts the Raider.IO API for each character and updates:
+
+- **Item level** (equipped gear average)
+- **Avatar** (thumbnail used in profile embeds)
+- **Raider.IO profile URL** (auto-constructed from region/realm/name)
+- **Progression** (most recent raid tier summary, e.g. `8/8 M`)
+
+Characters are eligible for sync if they have a **realm + region** stored (added via `/character add realm:`) **or** a **Raider.IO URL** stored (added via `/character link` or `/admin character edit`). Characters registered without any of these cannot be looked up and are skipped.
+
+A live progress message updates every 5 characters so you can track how far along the sync is. A final summary shows how many characters were updated, skipped, or not found on Raider.IO.
+
+```
+/admin character sync_raiderio
+```
+
+> **Note:** The Raider.IO public API has no authentication key, so the bot paces requests at 0.5 seconds per character to avoid rate limits. A full guild sync of 20 characters takes about 10 seconds.
+
+---
+
+#### `/admin character audit`
+
+Scan all registered characters and check whether their Discord owner is still in the server. Any character belonging to a departed member is shown in an orange embed with a 🗑️ delete button for each one.
+
+Deletion uses a **three-stage confirmation** to prevent accidents:
+
+| Stage | Prompt | Buttons |
+|---|---|---|
+| 1 | Click 🗑️ on the character name | Opens "Are you sure?" |
+| 2 | **Are you sure?** — permanent, no undo | ✅ Yes, delete it · ❌ Cancel |
+| 3 | **⚠️ ARE YOU REALLY SURE?** | 💀 YES, DELETE FOREVER · 🛡️ No, abort! |
+
+Only after all three stages is the character actually removed. Each confirmation prompt times out after 60 seconds. The main audit list stays visible so you can handle multiple characters one by one.
+
+If all registered characters belong to current server members, the command responds with a green "All Clear" message instead.
+
+```
+/admin character audit
+```
+
+---
+
 ## Permissions System
 
 The bot uses a four-tier permission system:
@@ -1190,9 +1236,11 @@ Locked rosters prevent new signups or changes. The embed shows a **LOCKED** bann
 ### Event Lifecycle
 
 ```
-active → (auto-archive after 6h past event time) → completed
+active → (auto-archive 4 hours after event start) → completed
 active → /raid cancel → cancelled
 ```
+
+When an event is auto-archived the bot automatically deletes the signup embed and the boss progress embed from the channel so old posts don't pile up.
 
 ---
 
@@ -1230,7 +1278,21 @@ Reminders are scheduled automatically when an event is created. The bot sends a 
 | 30 minutes | Reminder embed with current signup count |
 | 5 minutes | Reminder embed + `@here` ping |
 
+Each new reminder automatically **deletes the previous one** before posting, so your event channel never fills up with stacked reminder messages — only the most recent reminder is ever visible.
+
 Reminders for cancelled or already-completed events are silently skipped.
+
+---
+
+## Auto-Archive & Cleanup
+
+**4 hours after the event's scheduled start time** the bot will:
+
+1. Mark the event as completed in the database
+2. Delete the signup embed from the channel
+3. Delete the boss progress embed from the channel (if one was posted)
+
+This keeps your event channels clean without any manual work. The archive check runs every 30 minutes and is timezone-aware using each guild's configured timezone.
 
 ---
 
