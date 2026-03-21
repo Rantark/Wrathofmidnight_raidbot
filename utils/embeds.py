@@ -15,19 +15,19 @@ from utils.constants import (
     BOT_COLOR, ERROR_COLOR, SUCCESS_COLOR, WARNING_COLOR,
 )
 
-# Distinct left-bar colors for each event type so multiple signup embeds
-# in the same channel are visually easy to tell apart at a glance.
-EVENT_TYPE_COLORS: dict[str, int] = {
-    "Normal Raid":     0x2ECC71,  # Green
-    "Heroic Raid":     0x3498DB,  # Blue
-    "Mythic Raid":     0x9B59B6,  # Purple
-    "Mythic+ Night":   0xE67E22,  # Orange
-    "PvP - RBG":       0xE74C3C,  # Red
-    "PvP - Arena":     0xC0392B,  # Dark red
-    "Achievement Run": 0xF1C40F,  # Gold
-    "Alt Raid":        0x1ABC9C,  # Teal
-    "Social Event":    0xE91E8C,  # Pink
-}
+# Palette of visually distinct colors cycled per-event within a guild.
+# Two events of the same type get different colors so raid leaders and
+# players can instantly tell the sign-up posts apart at a glance.
+EVENT_PALETTE: list[int] = [
+    0x3498DB,  # Blue
+    0xE74C3C,  # Red
+    0x2ECC71,  # Green
+    0x9B59B6,  # Purple
+    0xE67E22,  # Orange
+    0x1ABC9C,  # Teal
+    0xF1C40F,  # Gold
+    0xE91E8C,  # Pink
+]
 
 
 # ── Generic helpers ───────────────────────────────────────────────────────────
@@ -66,7 +66,9 @@ def build_event_embed(
     ``signups`` – dict with keys: tanks, healers, dps, bench, tentative, declined
     """
     status_tag = " 🔒 LOCKED" if locked else ""
-    color = EVENT_TYPE_COLORS.get(event.get("event_type", ""), BOT_COLOR)
+    # Use the per-event color assigned at creation time; fall back to the
+    # default bot color if the column is absent (pre-migration rows).
+    color = event.get("color") or BOT_COLOR
     embed = discord.Embed(
         title=f"📅  {event['event_name']}{status_tag}",
         color=color,

@@ -246,6 +246,31 @@ async def remove_character(
 # Events
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Rotating palette used to assign a distinct color to each new event so that
+# two simultaneous sign-up posts of the same type are visually distinguishable.
+_EVENT_COLOR_PALETTE: list[int] = [
+    0x3498DB,  # Blue
+    0xE74C3C,  # Red
+    0x2ECC71,  # Green
+    0x9B59B6,  # Purple
+    0xE67E22,  # Orange
+    0x1ABC9C,  # Teal
+    0xF1C40F,  # Gold
+    0xE91E8C,  # Pink
+]
+
+
+async def _next_event_color(db_path: str, guild_id: int) -> int:
+    """Return the next palette color for the guild, cycling through the list."""
+    row = await _fetchone(
+        db_path,
+        "SELECT COUNT(*) as cnt FROM events WHERE guild_id=?",
+        (guild_id,),
+    )
+    idx = (row["cnt"] if row else 0) % len(_EVENT_COLOR_PALETTE)
+    return _EVENT_COLOR_PALETTE[idx]
+
+
 async def create_event(
     db_path: str,
     guild_id: int,
@@ -260,14 +285,15 @@ async def create_event(
     max_healers: int = 5,
     max_dps: int = 13,
 ) -> int:
+    color = await _next_event_color(db_path, guild_id)
     return await _execute(
         db_path,
         """INSERT INTO events
            (guild_id, event_name, event_type, event_date, event_time,
-            description, channel_id, created_by, max_tanks, max_healers, max_dps)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            description, channel_id, created_by, max_tanks, max_healers, max_dps, color)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (guild_id, event_name, event_type, event_date, event_time,
-         description, channel_id, created_by, max_tanks, max_healers, max_dps),
+         description, channel_id, created_by, max_tanks, max_healers, max_dps, color),
     )
 
 

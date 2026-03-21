@@ -216,6 +216,8 @@ async def init_db(db_path: str) -> None:
             # Track Discord message IDs for posted reminder messages so old ones can be deleted
             "ALTER TABLE reminders ADD COLUMN message_id INTEGER",
             "ALTER TABLE reminders ADD COLUMN msg_channel_id INTEGER",
+            # Per-event accent color (integer Discord color) so simultaneous events are visually distinct
+            "ALTER TABLE events ADD COLUMN color INTEGER",
         ]
         for sql in migrations:
             try:
