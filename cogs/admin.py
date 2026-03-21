@@ -985,6 +985,205 @@ class Admin(commands.Cog):
             len(failed),
         )
 
+    # ── Character audit ────────────────────────────────────────────────────────
+
+    @char_admin_group.command(
+        name="audit",
+        description="Find characters owned by users who left the server and optionally delete them",
+    )
+    async def char_audit(self, interaction: discord.Interaction) -> None:
+        if not await is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can run a character audit."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        all_chars = await queries.get_all_guild_characters(config.DATABASE_PATH, interaction.guild_id)
+        if not all_chars:
+            await interaction.followup.send(
+                embed=embeds.info_embed("No Characters", "No characters are registered in this server."),
+                ephemeral=True,
+            )
+            return
+
+        # Check each unique owner against the current member list
+        orphans: list[dict] = []
+        checked: set[int] = set()
+        for char in all_chars:
+            uid = char["discord_id"]
+            member = interaction.guild.get_member(uid)
+            if member is None and uid not in checked:
+                # Not in cache — try a live fetch before marking as gone
+                try:
+                    member = await interaction.guild.fetch_member(uid)
+                except discord.NotFound:
+                    pass  # Confirmed not in server
+                except Exception:
+                    pass
+            checked.add(uid)
+            if member is None:
+                orphans.append(char)
+
+        if not orphans:
+            await interaction.followup.send(
+                embed=embeds.success_embed(
+                    "All Clear!",
+                    f"All **{len(all_chars)}** registered character(s) belong to current server members.\n"
+                    f"No cleanup needed.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # Group orphans by owner for the embed
+        by_user: dict[int, list[dict]] = {}
+        for char in orphans:
+            by_user.setdefault(char["discord_id"], []).append(char)
+
+        embed = discord.Embed(
+            title=f"🔍  Character Audit — {len(orphans)} Orphaned Character(s) Found",
+            description=(
+                f"The following **{len(orphans)}** character(s) are registered to Discord users "
+                f"who are **no longer in this server**.\n\n"
+                f"Press a 🗑️ button to start the deletion flow for that character."
+            ),
+            color=0xE67E22,
+        )
+        for uid, chars in by_user.items():
+            lines = []
+            for c in chars:
+                ilvl_tag = f" · {c['ilvl']} ilvl" if c.get("ilvl") else ""
+                main_tag = " ⭐" if c.get("is_main") else ""
+                lines.append(f"**{c['char_name']}**{main_tag} — {c['char_class']} {c['main_spec']}{ilvl_tag}")
+            embed.add_field(
+                name=f"<@{uid}>  (left server)",
+                value="\n".join(lines),
+                inline=False,
+            )
+
+        if len(orphans) > 20:
+            embed.set_footer(
+                text=f"Showing first 20 of {len(orphans)} orphaned characters. "
+                     f"Re-run /admin character audit after cleaning up to see the rest."
+            )
+
+        await interaction.followup.send(
+            embed=embed,
+            view=_AuditView(interaction.guild_id, orphans),
+            ephemeral=True,
+        )
+        log.info(
+            "Character audit by %s: %d total chars, %d orphaned",
+            interaction.user, len(all_chars), len(orphans),
+        )
+
+
+# ── Character audit UI views ───────────────────────────────────────────────────
+# Placed outside the cog class so discord.py can register the button decorators.
+
+class _AuditView(discord.ui.View):
+    """Main audit result — one 🗑️ button per orphaned character (up to 20)."""
+
+    def __init__(self, guild_id: int, orphans: list[dict]) -> None:
+        super().__init__(timeout=300)
+        for char in orphans[:20]:
+            self.add_item(_OrphanDeleteButton(guild_id, char["discord_id"], char["char_name"]))
+
+
+class _OrphanDeleteButton(discord.ui.Button):
+    """Represents a single orphaned character on the audit list."""
+
+    def __init__(self, guild_id: int, discord_id: int, char_name: str) -> None:
+        super().__init__(label=char_name, emoji="🗑️", style=discord.ButtonStyle.danger)
+        self.guild_id   = guild_id
+        self.discord_id = discord_id
+        self.char_name  = char_name
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view = _DeleteConfirmView(self.guild_id, self.discord_id, self.char_name)
+        await interaction.response.send_message(
+            embed=embeds.warning_embed(
+                "Are you sure?",
+                f"**{self.char_name}** is registered to a Discord user who has left the server.\n\n"
+                f"Deleting it will permanently remove the character. **There is no undo.**",
+            ),
+            view=view,
+            ephemeral=True,
+        )
+
+
+class _DeleteConfirmView(discord.ui.View):
+    """Stage 2: 'Are you sure?' — one more click before the real gate."""
+
+    def __init__(self, guild_id: int, discord_id: int, char_name: str) -> None:
+        super().__init__(timeout=60)
+        self.guild_id   = guild_id
+        self.discord_id = discord_id
+        self.char_name  = char_name
+
+    @discord.ui.button(label="Yes, delete it", emoji="✅", style=discord.ButtonStyle.danger)
+    async def yes(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        view = _DeleteDoubleConfirmView(self.guild_id, self.discord_id, self.char_name)
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="⚠️  ARE YOU REALLY SURE?",
+                description=(
+                    f"You are about to **permanently delete** `{self.char_name}` "
+                    f"from the guild registry.\n\n"
+                    f"There is **no undo.** The player would need to re-register from scratch."
+                ),
+                color=0xFF0000,
+            ),
+            view=view,
+        )
+
+    @discord.ui.button(label="Cancel", emoji="❌", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(
+            embed=embeds.info_embed("Cancelled", f"**{self.char_name}** was not deleted."),
+            view=None,
+        )
+
+
+class _DeleteDoubleConfirmView(discord.ui.View):
+    """Stage 3: the final 'ARE YOU REALLY SURE?' gate before actual deletion."""
+
+    def __init__(self, guild_id: int, discord_id: int, char_name: str) -> None:
+        super().__init__(timeout=60)
+        self.guild_id   = guild_id
+        self.discord_id = discord_id
+        self.char_name  = char_name
+
+    @discord.ui.button(label="YES, DELETE FOREVER", emoji="💀", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        await queries.remove_character(
+            config.DATABASE_PATH, self.discord_id, self.guild_id, self.char_name
+        )
+        self.stop()
+        await interaction.response.edit_message(
+            embed=embeds.success_embed(
+                "Character Deleted",
+                f"**{self.char_name}** has been permanently removed from the guild registry.",
+            ),
+            view=None,
+        )
+        log.info(
+            "Admin %s permanently deleted orphaned character %r (owner discord_id=%d)",
+            interaction.user, self.char_name, self.discord_id,
+        )
+
+    @discord.ui.button(label="No, abort!", emoji="🛡️", style=discord.ButtonStyle.secondary)
+    async def abort(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(
+            embed=embeds.info_embed("Aborted", f"**{self.char_name}** was not deleted."),
+            view=None,
+        )
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Admin(bot))
