@@ -213,6 +213,9 @@ async def init_db(db_path: str) -> None:
             "ALTER TABLE guild_settings ADD COLUMN roster_message_id INTEGER",
             "ALTER TABLE recurring_events ADD COLUMN last_posted_date TEXT",
             "ALTER TABLE characters ADD COLUMN raiderio_url TEXT",
+            # Track Discord message IDs for posted reminder messages so old ones can be deleted
+            "ALTER TABLE reminders ADD COLUMN message_id INTEGER",
+            "ALTER TABLE reminders ADD COLUMN msg_channel_id INTEGER",
         ]
         for sql in migrations:
             try:

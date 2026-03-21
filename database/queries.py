@@ -641,6 +641,26 @@ async def mark_reminder_sent(db_path: str, reminder_id: int) -> None:
     )
 
 
+async def set_reminder_message(
+    db_path: str, reminder_id: int, message_id: int, channel_id: int
+) -> None:
+    """Store the Discord message ID of a posted reminder so it can be deleted later."""
+    await _execute(
+        db_path,
+        "UPDATE reminders SET message_id=?, msg_channel_id=? WHERE reminder_id=?",
+        (message_id, channel_id, reminder_id),
+    )
+
+
+async def get_sent_reminder_messages(db_path: str, event_id: int) -> list[dict]:
+    """Return all previously sent reminder rows for an event that have a stored message_id."""
+    return await _fetchall(
+        db_path,
+        "SELECT reminder_id, message_id, msg_channel_id FROM reminders WHERE event_id=? AND sent=1 AND message_id IS NOT NULL",
+        (event_id,),
+    )
+
+
 async def delete_unsent_reminders(db_path: str, event_id: int) -> None:
     """Delete all unsent reminders for an event (used when rescheduling)."""
     await _execute(

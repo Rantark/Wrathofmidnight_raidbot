@@ -263,8 +263,27 @@ class RaidBot(commands.Bot):
         from utils.embeds import build_reminder_embed
         embed = build_reminder_embed(event, time_label, signed_up, tz_label=tz_abbrev)
 
+        # Delete any previously posted reminder messages for this event so the
+        # channel doesn't fill up with stacked reminder posts.
+        old_msgs = await queries.get_sent_reminder_messages(config.DATABASE_PATH, event["event_id"])
+        for old in old_msgs:
+            try:
+                old_ch = self.get_channel(old["msg_channel_id"])
+                if old_ch:
+                    old_msg = await old_ch.fetch_message(old["message_id"])
+                    await old_msg.delete()
+            except (discord.NotFound, discord.Forbidden):
+                pass
+            except Exception:
+                pass  # Don't let cleanup failure block the new reminder
+
         ping = "@here " if reminder["label"] == "5m" else ""
-        await channel.send(f"{ping}", embed=embed)
+        sent_msg = await channel.send(f"{ping}", embed=embed)
+
+        # Persist the message ID so the *next* reminder can delete this one.
+        await queries.set_reminder_message(
+            config.DATABASE_PATH, reminder["reminder_id"], sent_msg.id, channel.id
+        )
         await queries.mark_reminder_sent(config.DATABASE_PATH, reminder["reminder_id"])
         log.info("Fired reminder [%s] for event %d", reminder["label"], event["event_id"])
 
@@ -272,20 +291,67 @@ class RaidBot(commands.Bot):
     async def before_reminder_loop(self) -> None:
         await self.wait_until_ready()
 
-    @tasks.loop(hours=6)
+    @tasks.loop(minutes=30)
     async def auto_archive_loop(self) -> None:
-        """Auto-complete events whose date/time has passed by more than 6 hours."""
+        """Complete events that ended >4 hours ago and delete their Discord posts."""
         try:
-            cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).strftime("%Y-%m-%d")
-            from database.queries import _fetchall, _execute
-            stale = await _fetchall(
+            import pytz
+            from database.queries import _fetchall
+            active = await _fetchall(
                 config.DATABASE_PATH,
-                "SELECT event_id FROM events WHERE status='active' AND event_date < ?",
-                (cutoff,),
+                "SELECT event_id, guild_id, event_date, event_time, channel_id, message_id, "
+                "boss_channel_id, boss_message_id FROM events WHERE status='active'",
             )
-            for row in stale:
-                await queries.complete_event(config.DATABASE_PATH, row["event_id"])
-                log.info("Auto-archived event %d", row["event_id"])
+            now_utc = datetime.now(timezone.utc)
+            for event in active:
+                # Convert event start time to UTC using the guild's configured timezone
+                guild_settings = await queries.get_guild_settings(
+                    config.DATABASE_PATH, event["guild_id"]
+                )
+                tz_name = guild_settings.get("timezone") or config.TIMEZONE or "America/New_York"
+                try:
+                    tz = pytz.timezone(tz_name)
+                    naive_dt = datetime.strptime(
+                        f"{event['event_date']} {event['event_time']}", "%Y-%m-%d %H:%M"
+                    )
+                    event_dt_utc = tz.localize(naive_dt).astimezone(timezone.utc)
+                except Exception:
+                    # Fallback: treat stored time as UTC
+                    event_dt_utc = datetime.strptime(
+                        f"{event['event_date']} {event['event_time']}", "%Y-%m-%d %H:%M"
+                    ).replace(tzinfo=timezone.utc)
+
+                if now_utc < event_dt_utc + timedelta(hours=4):
+                    continue  # Not time yet
+
+                # Mark complete first so the embed refresh no longer picks it up
+                await queries.complete_event(config.DATABASE_PATH, event["event_id"])
+
+                # Delete the signup embed
+                if event.get("channel_id") and event.get("message_id"):
+                    try:
+                        ch = self.get_channel(event["channel_id"]) or \
+                             await self.fetch_channel(event["channel_id"])
+                        msg = await ch.fetch_message(event["message_id"])
+                        await msg.delete()
+                    except (discord.NotFound, discord.Forbidden):
+                        pass
+                    except Exception:
+                        log.exception("Error deleting signup embed for event %d", event["event_id"])
+
+                # Delete the boss progress embed if one exists
+                if event.get("boss_channel_id") and event.get("boss_message_id"):
+                    try:
+                        ch = self.get_channel(event["boss_channel_id"]) or \
+                             await self.fetch_channel(event["boss_channel_id"])
+                        msg = await ch.fetch_message(event["boss_message_id"])
+                        await msg.delete()
+                    except (discord.NotFound, discord.Forbidden):
+                        pass
+                    except Exception:
+                        log.exception("Error deleting boss embed for event %d", event["event_id"])
+
+                log.info("Auto-archived event %d and deleted channel posts", event["event_id"])
         except Exception:
             log.exception("Error in auto-archive loop")
 
