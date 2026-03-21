@@ -338,7 +338,8 @@ def build_guild_roster_embed(
                 spec += f" / {char['off_spec']}"
             profs   = char.get("professions") or "—"
             prog    = char.get("progression") or "—"
-            lines.append(f"{prefix} **{char['char_name']}**{star}  {spec}  |  {profs}  |  {prog}")
+            rio_link = f"  |  [rio]({char['raiderio_url']})" if char.get("raiderio_url") else ""
+            lines.append(f"{prefix} **{char['char_name']}**{star}  {spec}  |  {profs}  |  {prog}{rio_link}")
         embed.add_field(
             name=f"**{cls}**  ({len(chars)})",
             value="\n".join(lines),
