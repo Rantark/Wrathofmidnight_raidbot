@@ -165,6 +165,17 @@ async def get_all_guild_characters(db_path: str, guild_id: int) -> list[dict]:
     )
 
 
+async def get_guild_character_by_name(
+    db_path: str, guild_id: int, char_name: str
+) -> Optional[dict]:
+    """Find any character in a guild by name (case-insensitive), regardless of owner."""
+    return await _fetchone(
+        db_path,
+        "SELECT * FROM characters WHERE guild_id=? AND LOWER(char_name)=LOWER(?)",
+        (guild_id, char_name),
+    )
+
+
 async def get_character(
     db_path: str, discord_id: int, guild_id: int, char_name: str
 ) -> Optional[dict]:
@@ -208,7 +219,7 @@ async def update_character(
     char_name: str,
     **kwargs: Any,
 ) -> None:
-    allowed = {"main_spec", "off_spec", "ilvl", "notes", "race", "realm", "region", "avatar_url", "faction", "professions", "progression"}
+    allowed = {"main_spec", "off_spec", "ilvl", "notes", "race", "realm", "region", "avatar_url", "faction", "professions", "progression", "raiderio_url"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if not updates:
         return

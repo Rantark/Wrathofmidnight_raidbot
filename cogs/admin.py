@@ -22,7 +22,8 @@ from discord.ext import commands
 import config
 from database import queries
 from utils import embeds
-from utils.validators import validate_percentage
+from utils.validators import validate_percentage, validate_spec, validate_ilvl
+from utils.constants import CLASS_COLORS, VALID_SPECS, ALL_SPECS
 
 log = logging.getLogger(__name__)
 
@@ -602,6 +603,251 @@ class Admin(commands.Cog):
         import asyncio
         await asyncio.sleep(1)
         await self.bot.do_restart()
+
+
+    # ── Admin character management ─────────────────────────────────────────────
+
+    char_admin_group = app_commands.Group(
+        name="character",
+        description="Admin tools for managing guild characters",
+        parent=admin_group,
+    )
+
+    @char_admin_group.command(name="list", description="List all registered characters in this server")
+    async def char_admin_list(self, interaction: discord.Interaction) -> None:
+        if not await is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can use this command."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        all_chars = await queries.get_all_guild_characters(config.DATABASE_PATH, interaction.guild_id)
+
+        if not all_chars:
+            await interaction.followup.send(
+                embed=embeds.info_embed("No Characters", "No characters have been registered in this server yet."),
+                ephemeral=True,
+            )
+            return
+
+        # Group by class
+        by_class: dict[str, list[dict]] = {}
+        for char in all_chars:
+            by_class.setdefault(char["char_class"], []).append(char)
+
+        embed = discord.Embed(
+            title=f"📋  Guild Characters  ({len(all_chars)} registered)",
+            color=0x3498DB,
+        )
+
+        for cls in sorted(by_class.keys()):
+            chars = by_class[cls]
+            lines = []
+            for char in chars:
+                member = interaction.guild.get_member(char["discord_id"])
+                owner = member.mention if member else f"<@{char['discord_id']}>"
+                spec = char["main_spec"]
+                if char.get("off_spec"):
+                    spec += f"/{char['off_spec']}"
+                ilvl_tag = f" · **{char['ilvl']}** ilvl" if char.get("ilvl") else ""
+                main_tag = " ⭐" if char.get("is_main") else ""
+                rio_tag  = f" · [rio]({char['raiderio_url']})" if char.get("raiderio_url") else ""
+                lines.append(f"**{char['char_name']}**{main_tag} — {spec}{ilvl_tag}{rio_tag} ({owner})")
+
+            embed.add_field(
+                name=f"{cls}  ({len(chars)})",
+                value="\n".join(lines),
+                inline=False,
+            )
+
+        embed.set_footer(text=f"⭐ = main  ·  Total: {len(all_chars)} characters across {len(by_class)} classes")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @char_admin_group.command(name="view", description="View a character's full profile in a detailed embed")
+    @app_commands.describe(char_name="Character name to look up (searches all guild members)")
+    async def char_admin_view(self, interaction: discord.Interaction, char_name: str) -> None:
+        if not await is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can use this command."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        char = await queries.get_guild_character_by_name(
+            config.DATABASE_PATH, interaction.guild_id, char_name
+        )
+        if not char:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"No character named **{char_name}** found in this server."),
+                ephemeral=True,
+            )
+            return
+
+        member = interaction.guild.get_member(char["discord_id"])
+        owner_name = member.display_name if member else f"<@{char['discord_id']}>"
+
+        color = CLASS_COLORS.get(char["char_class"], 0x3498DB)
+        embed = discord.Embed(
+            title=f"{char['char_name']}  {'⭐' if char.get('is_main') else ''}",
+            color=color,
+        )
+        if member:
+            embed.set_author(name=owner_name, icon_url=member.display_avatar.url)
+        else:
+            embed.set_author(name=owner_name)
+
+        if char.get("avatar_url"):
+            embed.set_thumbnail(url=char["avatar_url"])
+
+        # Core fields
+        embed.add_field(name="Class",     value=char["char_class"], inline=True)
+        embed.add_field(name="Main Spec", value=char["main_spec"],  inline=True)
+        if char.get("off_spec"):
+            embed.add_field(name="Off Spec", value=char["off_spec"], inline=True)
+        if char.get("ilvl"):
+            embed.add_field(name="Item Level", value=str(char["ilvl"]), inline=True)
+        if char.get("race"):
+            embed.add_field(name="Race", value=char["race"], inline=True)
+        if char.get("faction"):
+            embed.add_field(name="Faction", value=char["faction"], inline=True)
+
+        # Realm / region
+        if char.get("realm"):
+            realm_str = char["realm"].replace("-", " ").title()
+            if char.get("region"):
+                realm_str += f"  ({char['region'].upper()})"
+            embed.add_field(name="Realm", value=realm_str, inline=True)
+
+        # Professions
+        if char.get("professions"):
+            embed.add_field(name="Professions", value=char["professions"], inline=False)
+
+        # Progression
+        if char.get("progression"):
+            embed.add_field(name="Raid Progression", value=char["progression"], inline=False)
+
+        # Notes
+        if char.get("notes"):
+            embed.add_field(name="Notes", value=char["notes"], inline=False)
+
+        # Raider.IO link
+        if char.get("raiderio_url"):
+            embed.add_field(name="Raider.IO", value=f"[View Profile]({char['raiderio_url']})", inline=True)
+
+        embed.set_footer(text=f"Registered by {owner_name}")
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @char_admin_group.command(name="edit", description="Edit any guild member's character (admin override)")
+    @app_commands.describe(
+        member="The member who owns the character",
+        char_name="Name of the character to edit",
+        spec="New main spec",
+        off_spec="New off spec",
+        ilvl="New item level",
+        professions="Professions (comma-separated)",
+        progression="Raid progression (e.g. 8/8 M)",
+        raiderio_url="Raider.IO profile URL",
+        notes="Officer notes for this character",
+    )
+    async def char_admin_edit(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        char_name: str,
+        spec: Optional[str] = None,
+        off_spec: Optional[str] = None,
+        ilvl: Optional[int] = None,
+        professions: Optional[str] = None,
+        progression: Optional[str] = None,
+        raiderio_url: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> None:
+        if not await is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can use this command."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        char = await queries.get_character(config.DATABASE_PATH, member.id, interaction.guild_id, char_name)
+        if not char:
+            await interaction.followup.send(
+                embed=embeds.error_embed("Not Found", f"**{member.display_name}** has no character named **{char_name}**."),
+                ephemeral=True,
+            )
+            return
+
+        updates: dict = {}
+
+        if spec:
+            validated = validate_spec(char["char_class"], spec)
+            if not validated:
+                spec_list = ", ".join(ALL_SPECS.get(char["char_class"], []))
+                await interaction.followup.send(
+                    embed=embeds.error_embed("Invalid Spec", f"**{spec}** is not valid for {char['char_class']}.\nValid specs: {spec_list}"),
+                    ephemeral=True,
+                )
+                return
+            updates["main_spec"] = validated
+
+        if off_spec:
+            validated_off = validate_spec(char["char_class"], off_spec)
+            if not validated_off:
+                spec_list = ", ".join(ALL_SPECS.get(char["char_class"], []))
+                await interaction.followup.send(
+                    embed=embeds.error_embed("Invalid Off-Spec", f"**{off_spec}** is not valid for {char['char_class']}.\nValid specs: {spec_list}"),
+                    ephemeral=True,
+                )
+                return
+            updates["off_spec"] = validated_off
+
+        if ilvl is not None:
+            if not validate_ilvl(ilvl):
+                await interaction.followup.send(
+                    embed=embeds.error_embed("Invalid Item Level", "Item level must be between 1 and 700."),
+                    ephemeral=True,
+                )
+                return
+            updates["ilvl"] = ilvl
+
+        if professions is not None:
+            updates["professions"] = professions
+        if progression is not None:
+            updates["progression"] = progression
+        if notes is not None:
+            updates["notes"] = notes
+        if raiderio_url is not None:
+            # Basic sanity check — must look like a raider.io URL
+            if raiderio_url and not raiderio_url.startswith("https://raider.io/"):
+                await interaction.followup.send(
+                    embed=embeds.error_embed("Invalid URL", "Raider.IO URLs must start with `https://raider.io/`."),
+                    ephemeral=True,
+                )
+                return
+            updates["raiderio_url"] = raiderio_url
+
+        if not updates:
+            await interaction.followup.send(
+                embed=embeds.warning_embed("Nothing to Change", "Provide at least one field to update."),
+                ephemeral=True,
+            )
+            return
+
+        await queries.update_character(config.DATABASE_PATH, member.id, interaction.guild_id, char_name, **updates)
+
+        changed = ", ".join(k.replace("_", " ").title() for k in updates)
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Character Updated",
+                f"**{char['char_name']}** ({member.mention}) updated.\nFields changed: {changed}",
+            ),
+            ephemeral=True,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

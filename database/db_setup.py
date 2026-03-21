@@ -212,6 +212,7 @@ async def init_db(db_path: str) -> None:
             "ALTER TABLE guild_settings ADD COLUMN roster_channel_id INTEGER",
             "ALTER TABLE guild_settings ADD COLUMN roster_message_id INTEGER",
             "ALTER TABLE recurring_events ADD COLUMN last_posted_date TEXT",
+            "ALTER TABLE characters ADD COLUMN raiderio_url TEXT",
         ]
         for sql in migrations:
             try:
