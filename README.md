@@ -20,6 +20,7 @@ A self-hosted Discord bot for managing World of Warcraft guild raid events, rost
    - [/attendance commands](#attendance-commands)
    - [/absence commands](#absence-commands)
    - [/admin commands](#admin-commands)
+   - [/admin character commands](#admin-character-commands)
 10. [Permissions System](#permissions-system)
 11. [Attendance Tracking Guide](#attendance-tracking-guide)
 12. [Event & Signup System Guide](#event--signup-system-guide)
@@ -40,15 +41,19 @@ A self-hosted Discord bot for managing World of Warcraft guild raid events, rost
 |---|---|
 | **Raid Event Management** | Create, edit, and cancel raid events with live interactive signup embeds |
 | **Role-Based Signups** | Tank / Healer / DPS buttons with automatic bench management when slots fill |
-| **Character Registration** | Register WoW characters with class, spec, and item level |
+| **Character Registration** | Register WoW characters manually, via Armory lookup, or by pasting a Raider.IO URL |
 | **Armory Integration** | Auto-fill character info from Raider.IO or the Blizzard Battle.net API |
+| **Raider.IO Profiles** | Store and display Raider.IO profile links on character profiles |
 | **Attendance Tracking** | Mark members present/late/excused/absent; generate threshold reports and CSV exports |
 | **Absence Requests** | Members submit excused absences before events; absences are excluded from their % |
 | **Boss Progress Tracking** | Set a raid's boss list from a 373-boss database and mark kills live |
 | **Event Templates** | Save a raid as a template and re-use it with a new date in seconds |
-| **Automatic Reminders** | DMs / channel pings at 24h, 2h, 30m, and 5m before every event |
+| **Weekly Recurring Events** | Schedule a template to auto-post a signup embed every week without any manual work |
+| **Automatic Reminders** | Channel pings at 24h, 2h, 30m, and 5m before every event |
 | **Auto-Archive** | Completed events are automatically archived 6 hours after they end |
 | **Multi-Channel Support** | Post events to any combination of channels; per-channel labeling |
+| **Public Guild Roster** | Post a live roster embed that auto-updates as members register characters |
+| **Admin Character Tools** | Admins can list, view, and edit any guild member's character, including Raider.IO links |
 | **Auto Guild Registration** | Inviting the bot to a new server instantly syncs commands and saves the guild ID |
 | **Data Export** | Export all guild data (events, signups, characters, attendance) as JSON |
 | **Self-Update** | `/admin update` pulls the latest code from git and restarts the bot |
@@ -265,6 +270,23 @@ Your first added character is automatically set as your main and will be used wh
 
 ---
 
+#### `/character link`
+
+Register a character by pasting their Raider.IO profile URL. The bot fetches all data automatically — no need to type realm, class, or spec.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `url` | Yes | Full Raider.IO URL (e.g. `https://raider.io/characters/us/stormrage/thrall`) |
+| `off_spec` | No | Off spec (optional) |
+| `professions` | No | Professions, comma-separated |
+| `progression` | No | Current raid progression |
+
+```
+/character link url:https://raider.io/characters/us/stormrage/thrall
+```
+
+---
+
 #### `/character main`
 
 Set one of your registered characters as your main. Your main is used for automatic role detection when you click a signup button.
@@ -299,9 +321,11 @@ Update an existing character's spec or item level.
 | `spec` | No | New main spec |
 | `off_spec` | No | New off-spec |
 | `ilvl` | No | New item level (1–700) |
+| `professions` | No | Professions, comma-separated |
+| `progression` | No | Current raid progression |
 
 ```
-/character update name:Arthax spec:Arms ilvl:490
+/character update name:Arthax spec:Arms ilvl:490 professions:"Blacksmithing, Mining"
 ```
 
 ---
@@ -330,6 +354,31 @@ Re-fetch class, spec, item level, and avatar from Raider.IO / Blizzard Armory. T
 
 ```
 /character sync name:Arthax
+```
+
+---
+
+#### `/character progression`
+
+Quickly set or update raid progression for a character without touching other fields.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `name` | Yes | Character name |
+| `progression` | Yes | Progression string (e.g. `8/8 M`, `4/8 H Nerub-ar Palace`) |
+
+```
+/character progression name:Arthax progression:"8/8 M Nerub-ar Palace"
+```
+
+---
+
+#### `/character roster`
+
+View all registered characters in the server grouped by class, with spec, ilvl, and owner. **Raid Leader / Officer only.**
+
+```
+/character roster
 ```
 
 ---
@@ -511,6 +560,61 @@ Permanently delete a template.
 
 ```
 /raid template delete template_name:old-template
+```
+
+---
+
+#### `/raid recurring add`
+
+Set up a weekly schedule that automatically posts a signup embed from a template, a configurable number of days before each occurrence. No manual action needed each week.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `template_name` | Yes | The template to use each week |
+| `day` | Yes | Day the raid occurs (e.g. `Wednesday`, `Thursday`) |
+| `days_ahead` | No | How many days before the raid to post the signup (default: `7`, max: `28`) |
+| `channel` | No | Channel to post in (uses guild default if omitted) |
+
+```
+/raid recurring add template_name:weekly-heroic day:Wednesday days_ahead:7
+```
+
+---
+
+#### `/raid recurring list`
+
+Show all recurring schedules for this server, including template name, day, posting lead time, channel, enabled/paused status, and the date of the last auto-created event.
+
+```
+/raid recurring list
+```
+
+---
+
+#### `/raid recurring toggle`
+
+Pause or resume a recurring schedule without deleting it.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `recurring_id` | Yes | ID shown in `/raid recurring list` |
+
+```
+/raid recurring toggle recurring_id:1
+```
+
+---
+
+#### `/raid recurring remove`
+
+Permanently delete a recurring schedule.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `recurring_id` | Yes | ID shown in `/raid recurring list` |
+
+```
+/raid recurring remove recurring_id:1
 ```
 
 ---
@@ -761,6 +865,20 @@ Show all members who have been granted bot-level roles (Raid Leader / Officer) i
 
 ---
 
+#### `/admin roster_post`
+
+Post a live public guild roster embed to a channel. The embed automatically updates whenever any member registers, updates, or removes a character.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `channel` | Yes | Channel to post the roster in |
+
+```
+/admin roster_post channel:#guild-roster
+```
+
+---
+
 #### `/admin set_event_channel`
 
 Set the default channel where new raid events are posted. Also registers the channel in the multi-channel list.
@@ -858,6 +976,20 @@ Set the attendance percentage below which members will appear in `/attendance re
 
 ---
 
+#### `/admin timezone`
+
+Set the timezone used for displaying event times and scheduling reminders. All upcoming events are immediately updated — reminders are rescheduled and embeds refreshed.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `timezone` | Yes | IANA timezone name (e.g. `America/Chicago`, `Europe/London`) |
+
+```
+/admin timezone timezone:America/Chicago
+```
+
+---
+
 #### `/admin status`
 
 View a complete overview of the bot's current configuration for this server: channels, roster defaults, attendance threshold, timezone, database path, and bot version.
@@ -904,6 +1036,61 @@ Run `git pull` to fetch the latest code, then restart the bot automatically if n
 
 ```
 /admin update
+```
+
+---
+
+---
+
+### `/admin character` Commands
+
+Admin-only tools for viewing and managing any guild member's character. Require Discord **Server Administrator** permission.
+
+---
+
+#### `/admin character list`
+
+List every registered character in the server, grouped by class. Shows name, main/off spec, item level, owner mention, and a Raider.IO link if one is stored. Useful for a quick roster audit.
+
+```
+/admin character list
+```
+
+---
+
+#### `/admin character view`
+
+Look up any character by name (searches all guild members) and display a full detailed embed: class, specs, item level, race, faction, realm, professions, progression, notes, and Raider.IO profile link.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `char_name` | Yes | Character name to search for |
+
+```
+/admin character view char_name:Arthax
+```
+
+---
+
+#### `/admin character edit`
+
+Edit any field on any guild member's character without needing their cooperation. This is the primary way to add Raider.IO profile links to existing characters.
+
+| Parameter | Required | Description |
+|---|---|---|
+| `member` | Yes | The member who owns the character |
+| `char_name` | Yes | Name of the character to edit |
+| `spec` | No | New main spec |
+| `off_spec` | No | New off-spec |
+| `ilvl` | No | New item level |
+| `professions` | No | New professions |
+| `progression` | No | New raid progression |
+| `raiderio_url` | No | Raider.IO profile URL (`https://raider.io/...`) |
+| `notes` | No | Officer notes (visible in `/admin character view`) |
+
+```
+/admin character edit member:@Rantark char_name:Arthax raiderio_url:https://raider.io/characters/us/stormrage/arthax
+/admin character edit member:@Rantark char_name:Arthax ilvl:495 progression:"8/8 M"
 ```
 
 ---
