@@ -898,6 +898,18 @@ class Admin(commands.Cog):
             realm  = char["realm"]
             region = char["region"]
 
+            # Characters linked via /char link or admin-edit have a raiderio_url
+            # but may not have realm/region columns — parse them from the URL.
+            if (not realm or not region) and char.get("raiderio_url"):
+                parsed = rio.parse_url(char["raiderio_url"])
+                if parsed:
+                    region, realm, _ = parsed  # name from URL; use char_name for the query
+
+            if not realm or not region:
+                # No way to look this character up; skip silently
+                skipped.append(name)
+                continue
+
             # Edit progress embed every 5 characters so the admin can see it's working
             if i % 5 == 1 and i > 1:
                 try:

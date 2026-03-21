@@ -157,11 +157,16 @@ async def get_user_characters(
 
 
 async def get_guild_characters_for_sync(db_path: str, guild_id: int) -> list[dict]:
-    """Return all characters in the guild that have realm+region set (required for Raider.IO lookup)."""
+    """Return all characters syncable with Raider.IO.
+
+    Includes characters that have realm+region stored AND characters that
+    have a raiderio_url stored (added via /char link or admin edit), since
+    region/realm/name can be parsed directly from the URL for the latter.
+    """
     return await _fetchall(
         db_path,
-        "SELECT discord_id, char_name, realm, region FROM characters "
-        "WHERE guild_id=? AND realm IS NOT NULL AND region IS NOT NULL "
+        "SELECT discord_id, char_name, realm, region, raiderio_url FROM characters "
+        "WHERE guild_id=? AND (realm IS NOT NULL AND region IS NOT NULL OR raiderio_url IS NOT NULL) "
         "ORDER BY char_name",
         (guild_id,),
     )
