@@ -156,6 +156,17 @@ async def get_user_characters(
     )
 
 
+async def get_guild_characters_for_sync(db_path: str, guild_id: int) -> list[dict]:
+    """Return all characters in the guild that have realm+region set (required for Raider.IO lookup)."""
+    return await _fetchall(
+        db_path,
+        "SELECT discord_id, char_name, realm, region FROM characters "
+        "WHERE guild_id=? AND realm IS NOT NULL AND region IS NOT NULL "
+        "ORDER BY char_name",
+        (guild_id,),
+    )
+
+
 async def get_all_guild_characters(db_path: str, guild_id: int) -> list[dict]:
     """Return all characters registered in a guild, sorted by class then name."""
     return await _fetchall(

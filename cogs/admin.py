@@ -850,5 +850,141 @@ class Admin(commands.Cog):
         )
 
 
+    @char_admin_group.command(
+        name="sync_raiderio",
+        description="Bulk-sync every registered guild character with Raider.IO (ilvl, avatar, progression)",
+    )
+    async def sync_raiderio(self, interaction: discord.Interaction) -> None:
+        if not await is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can sync Raider.IO data."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        chars = await queries.get_guild_characters_for_sync(config.DATABASE_PATH, interaction.guild_id)
+        if not chars:
+            await interaction.followup.send(
+                embed=embeds.warning_embed(
+                    "Nothing to Sync",
+                    "No characters have a realm + region saved.  "
+                    "Members must register with `/char add realm:` or `/char link` so the bot knows where to look.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        from utils import raiderio as rio
+        import asyncio
+        import re as _re
+
+        updated: list[str] = []
+        skipped: list[str] = []
+        failed:  list[str] = []
+
+        # Post a live-updating progress message
+        progress_msg = await interaction.followup.send(
+            embed=embeds.info_embed(
+                "Syncing with Raider.IO…",
+                f"Starting sync for **{len(chars)}** character(s).  This may take a moment.",
+            ),
+            ephemeral=True,
+        )
+
+        for i, char in enumerate(chars, start=1):
+            name   = char["char_name"]
+            realm  = char["realm"]
+            region = char["region"]
+
+            # Edit progress embed every 5 characters so the admin can see it's working
+            if i % 5 == 1 and i > 1:
+                try:
+                    await progress_msg.edit(
+                        embed=embeds.info_embed(
+                            "Syncing with Raider.IO…",
+                            f"Progress: **{i - 1}/{len(chars)}** — last: {name}",
+                        )
+                    )
+                except Exception:
+                    pass
+
+            rio_data = await rio.client.get_character(region, realm, name)
+            if rio_data is None:
+                failed.append(name)
+                await asyncio.sleep(0.5)
+                continue
+
+            # ── Extract fields ───────────────────────────────────────────────
+            ilvl = (rio_data.get("gear") or {}).get("item_level_equipped") or None
+            avatar_url = rio_data.get("thumbnail_url") or None
+
+            # Build the canonical Raider.IO profile URL
+            realm_slug = realm.lower()
+            realm_slug = _re.sub(r"'", "", realm_slug)
+            realm_slug = _re.sub(r"[^a-z0-9 \-]", "", realm_slug)
+            realm_slug = realm_slug.replace(" ", "-")
+            raiderio_url = f"https://raider.io/characters/{region}/{realm_slug}/{name.lower()}"
+
+            # Pull progression summary from the most recent raid tier
+            progression: Optional[str] = None
+            raid_prog = rio_data.get("raid_progression") or {}
+            if raid_prog:
+                first_tier = next(iter(raid_prog.values()), {})
+                summary = first_tier.get("summary")
+                if summary:
+                    progression = summary
+
+            # ── Persist to DB ────────────────────────────────────────────────
+            updates: dict = {}
+            if ilvl is not None:
+                updates["ilvl"] = int(ilvl)
+            if avatar_url:
+                updates["avatar_url"] = avatar_url
+            updates["raiderio_url"] = raiderio_url
+            if progression:
+                updates["progression"] = progression
+
+            if updates:
+                await queries.update_character(
+                    config.DATABASE_PATH,
+                    char["discord_id"],
+                    interaction.guild_id,
+                    name,
+                    **updates,
+                )
+                updated.append(name)
+            else:
+                skipped.append(name)
+
+            # Be polite to the Raider.IO API — no auth key means rate limits apply
+            await asyncio.sleep(0.5)
+
+        # ── Summary embed ────────────────────────────────────────────────────
+        lines: list[str] = []
+        if updated:
+            lines.append(f"**{len(updated)} updated:** {', '.join(updated)}")
+        if skipped:
+            lines.append(f"**{len(skipped)} skipped** (no data returned): {', '.join(skipped)}")
+        if failed:
+            lines.append(f"**{len(failed)} not found on Raider.IO:** {', '.join(failed)}")
+
+        summary = "\n\n".join(lines) or "No characters were processed."
+        await progress_msg.edit(
+            embed=embeds.success_embed(
+                f"Raider.IO Sync Complete  ({len(updated)}/{len(chars)} updated)",
+                summary,
+            )
+        )
+        log.info(
+            "Raider.IO bulk sync by %s: %d updated, %d skipped, %d failed",
+            interaction.user,
+            len(updated),
+            len(skipped),
+            len(failed),
+        )
+
+
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Admin(bot))
