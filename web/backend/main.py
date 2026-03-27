@@ -7,17 +7,20 @@ app = FastAPI(title="WoW Raid Bot API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=[
+        "https://raids.wrathofmidnight.org",
+        "http://localhost:5173",  # For local dev
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(characters.router)
-app.include_router(events.router)
-app.include_router(attendance.router)
-app.include_router(admin.router)
+app.include_router(auth.router, prefix="/api")
+app.include_router(characters.router, prefix="/api")
+app.include_router(events.router, prefix="/api")
+app.include_router(attendance.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 
 
 @app.get("/")

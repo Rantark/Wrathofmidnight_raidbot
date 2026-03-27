@@ -1,3 +1,4 @@
+import { AuthCallback } from '@/pages/AuthCallback';
 import { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Sidebar } from '@/components/Layout/Sidebar';
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="/admin" element={
             <ProtectedRoute require="officer"><AdminPage /></ProtectedRoute>
           } />
+	<Route path="/auth/callback" element={<AuthCallback />} />
 
           <Route path="*" element={
             isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />

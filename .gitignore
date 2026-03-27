@@ -36,3 +36,7 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+Discord Secret Keys and stuff
+web/frontend/node_modules/
+web/frontend/cloudflared.deb
+web/backend/.env

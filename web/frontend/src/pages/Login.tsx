@@ -33,9 +33,7 @@ export function Login() {
     if (isAuthenticated) navigate('/dashboard', { replace: true });
   }, [isAuthenticated, navigate]);
 
-  const discordClientId = import.meta.env.VITE_DISCORD_CLIENT_ID ?? '';
-  const redirectUri = encodeURIComponent(import.meta.env.VITE_DISCORD_REDIRECT_URI ?? `${window.location.origin}/login`);
-  const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${discordClientId}&redirect_uri=${redirectUri}&response_type=code&scope=identify+guilds`;
+  const oauthUrl = '/api/auth/discord';
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
