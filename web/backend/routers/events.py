@@ -31,10 +31,10 @@ async def list_event_channels(user: dict = Depends(get_current_user)):
             (guild_id,),
         )
         rows = await cur.fetchall()
-        channels = [dict(r) for r in rows]
+        channels = [{**dict(r), "channel_id": str(r["channel_id"])} for r in rows]
     # Also include the guild default if set and not already listed
     settings = await get_guild_settings(guild_id)
-    default_id = settings.get("event_channel_id") if settings else None
+    default_id = str(settings.get("event_channel_id")) if settings else None
     if default_id and not any(c["channel_id"] == default_id for c in channels):
         channels.insert(0, {"channel_id": default_id, "label": "Guild Default"})
     return channels
@@ -96,7 +96,7 @@ async def create_event(body: EventCreate, user: dict = Depends(require_raid_lead
     max_tanks   = body.max_tanks   if body.max_tanks   is not None else (settings["default_max_tanks"]   if settings else 2)
     max_healers = body.max_healers if body.max_healers is not None else (settings["default_max_healers"] if settings else 5)
     max_dps     = body.max_dps     if body.max_dps     is not None else (settings["default_max_dps"]     if settings else 13)
-    channel_id  = body.channel_id  if body.channel_id  is not None else (settings.get("event_channel_id") if settings else None)
+    channel_id = settings.get("event_channel_id") if settings else body.channel_id
 
     async with get_db() as db:
         cur = await db.execute(
