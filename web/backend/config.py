@@ -4,6 +4,7 @@ from urllib.parse import quote
 
 load_dotenv()
 
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_TOKEN", "")  # Shared with the bot; used to post embeds directly
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
 DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "http://localhost:5173/auth/callback")

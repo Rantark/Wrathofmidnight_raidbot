@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft, Users, Lock, Calendar, Plus, Pencil, Trash2,
-  XCircle, BookTemplate, Save, PlayCircle, Loader2, MessageSquareWarning,
+  XCircle, BookTemplate, Save, PlayCircle, Loader2, MessageSquareWarning, Send,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { EventCard } from '@/components/Events/EventCard';
@@ -171,6 +171,19 @@ export function EventDetail() {
     alert(`Template "${name}" saved!`);
   }
 
+  async function handlePostToDiscord() {
+    setActionLoading('post-discord');
+    try {
+      const res = await api.post(`/api/events/${id}/post-discord`);
+      alert(res.data.message ?? 'Posted to Discord!');
+      await refetch();
+    } catch (e: any) {
+      alert(e.response?.data?.detail ?? 'Failed to post to Discord');
+    } finally {
+      setActionLoading('');
+    }
+  }
+
   return (
     <div className="p-4 lg:p-8 max-w-4xl mx-auto space-y-5">
       {/* Title row */}
@@ -199,6 +212,18 @@ export function EventDetail() {
       {/* Officer action bar */}
       {isRaidLeader && isActive && (
         <div className="flex flex-wrap gap-2">
+          <button
+            onClick={handlePostToDiscord}
+            disabled={actionLoading === 'post-discord'}
+            className="btn-primary flex items-center gap-1.5 text-xs"
+            style={{ background: '#5865F2' }}
+            title={event.message_id ? 'Re-sync embed to Discord' : 'Post this event to Discord'}
+          >
+            {actionLoading === 'post-discord'
+              ? <Loader2 size={12} className="animate-spin" />
+              : <Send size={12} />}
+            {event.message_id ? 'Re-sync Discord' : 'Post to Discord'}
+          </button>
           <button
             onClick={() => setShowEdit(true)}
             className="btn-secondary flex items-center gap-1.5 text-xs"
