@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { Loader2, X, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 
 const WOW_CLASSES = [
@@ -23,9 +23,36 @@ export function CharacterForm({ onSuccess, onCancel, officerTargetDiscordId }: P
     realm: '',
     region: 'us',
     progression: '',
+    raiderio_url: '',
   });
   const [saving, setSaving] = useState(false);
+  const [looking, setLooking] = useState(false);
   const [error, setError] = useState('');
+  const [lookupError, setLookupError] = useState('');
+
+  async function handleRioLookup() {
+    if (!form.raiderio_url.trim()) return;
+    setLooking(true);
+    setLookupError('');
+    try {
+      const res = await api.post('/api/characters/raiderio-lookup', { url: form.raiderio_url });
+      const d = res.data;
+      setForm(f => ({
+        ...f,
+        char_name:   d.char_name  || f.char_name,
+        char_class:  d.char_class || f.char_class,
+        main_spec:   d.main_spec  || f.main_spec,
+        ilvl:        d.ilvl != null ? String(d.ilvl) : f.ilvl,
+        realm:       d.realm      || f.realm,
+        region:      d.region     || f.region,
+        raiderio_url: d.raiderio_url || f.raiderio_url,
+      }));
+    } catch (err: any) {
+      setLookupError(err.response?.data?.detail ?? 'Raider.IO lookup failed');
+    } finally {
+      setLooking(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,6 +65,7 @@ export function CharacterForm({ onSuccess, onCancel, officerTargetDiscordId }: P
         off_spec: form.off_spec || undefined,
         realm: form.realm || undefined,
         progression: form.progression || undefined,
+        raiderio_url: form.raiderio_url || undefined,
       };
       if (officerTargetDiscordId) {
         await api.post(`/api/characters/officer?target_discord_id=${officerTargetDiscordId}`, body);
@@ -62,6 +90,31 @@ export function CharacterForm({ onSuccess, onCancel, officerTargetDiscordId }: P
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3">
+        {/* ── Raider.IO auto-fill ───────────────────────────────────────── */}
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">
+            Raider.IO URL <span className="text-indigo-400">(auto-fills fields below)</span>
+          </label>
+          <div className="flex gap-2">
+            <input
+              className="input flex-1"
+              placeholder="https://raider.io/characters/us/stormrage/thrall"
+              value={form.raiderio_url}
+              onChange={(e) => setForm({ ...form, raiderio_url: e.target.value })}
+            />
+            <button
+              type="button"
+              onClick={handleRioLookup}
+              disabled={looking || !form.raiderio_url.trim()}
+              className="btn-secondary flex items-center gap-1 whitespace-nowrap"
+            >
+              {looking ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              {looking ? 'Looking up…' : 'Lookup'}
+            </button>
+          </div>
+          {lookupError && <p className="text-red-400 text-xs mt-1">{lookupError}</p>}
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-gray-400 mb-1 block">Name *</label>

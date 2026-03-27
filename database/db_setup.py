@@ -28,6 +28,20 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     char_reg_message_id   INTEGER
 );
 
+-- ── Character registration log ───────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS char_registration_log (
+    log_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id   INTEGER NOT NULL,
+    discord_id INTEGER NOT NULL,
+    username   TEXT,
+    char_name  TEXT    NOT NULL,
+    char_class TEXT    NOT NULL,
+    action     TEXT    NOT NULL DEFAULT 'register',
+    source     TEXT             DEFAULT 'web',
+    created_at TEXT    NOT NULL DEFAULT (datetime('now','utc'))
+);
+CREATE INDEX IF NOT EXISTS idx_char_reg_log ON char_registration_log(guild_id, created_at DESC);
+
 -- ── Raid leader / officer roles ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS permissions (
     guild_id   INTEGER NOT NULL,
@@ -250,6 +264,18 @@ async def init_db(db_path: str) -> None:
                 processed  INTEGER NOT NULL DEFAULT 0
             )""",
             "CREATE INDEX IF NOT EXISTS idx_web_actions_pending ON web_actions(processed, created_at)",
+            """CREATE TABLE IF NOT EXISTS char_registration_log (
+                log_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id   INTEGER NOT NULL,
+                discord_id INTEGER NOT NULL,
+                username   TEXT,
+                char_name  TEXT    NOT NULL,
+                char_class TEXT    NOT NULL,
+                action     TEXT    NOT NULL DEFAULT 'register',
+                source     TEXT             DEFAULT 'web',
+                created_at TEXT    NOT NULL DEFAULT (datetime('now','utc'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_char_reg_log ON char_registration_log(guild_id, created_at DESC)",
         ]
         for sql in new_tables:
             try:

@@ -119,6 +119,39 @@ async def queue_web_action(guild_id: int, action: str, event_id: int | None = No
         await db.commit()
 
 
+async def log_character_action(
+    guild_id: int,
+    discord_id: int,
+    username: str,
+    char_name: str,
+    char_class: str,
+    action: str = "register",
+    source: str = "web",
+) -> None:
+    async with get_db() as db:
+        await db.execute(
+            """INSERT INTO char_registration_log
+               (guild_id, discord_id, username, char_name, char_class, action, source)
+               VALUES (?,?,?,?,?,?,?)""",
+            (guild_id, discord_id, username, char_name, char_class, action, source),
+        )
+        await db.commit()
+
+
+async def get_char_registration_log(guild_id: int, limit: int = 200) -> list[dict]:
+    async with get_db() as db:
+        cur = await db.execute(
+            """SELECT log_id, discord_id, username, char_name, char_class, action, source, created_at
+               FROM char_registration_log
+               WHERE guild_id=?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (guild_id, limit),
+        )
+        rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+
 async def get_attendance_history(discord_id: int, guild_id: int, limit: int = 20) -> list[dict]:
     async with get_db() as db:
         cur = await db.execute(

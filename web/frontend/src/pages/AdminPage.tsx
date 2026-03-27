@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { classColor } from '@/lib/utils';
-import { ExternalLink, AlertTriangle, Loader2, Trash2, UserPlus, Settings, Users, BarChart3 } from 'lucide-react';
+import { ExternalLink, AlertTriangle, Loader2, Trash2, UserPlus, Settings, Users, BarChart3, ClipboardList } from 'lucide-react';
 import type { Character, Permission, GuildConfig } from '@/types';
 
-type Tab = 'overview' | 'permissions' | 'config';
+type Tab = 'overview' | 'permissions' | 'config' | 'reglog';
 
 export function AdminPage() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -16,9 +16,10 @@ export function AdminPage() {
 
       <div className="flex gap-1 p-1 glass rounded-xl w-fit flex-wrap">
         {([
-          { id: 'overview' as Tab, label: 'Overview', icon: BarChart3 },
-          { id: 'permissions' as Tab, label: 'Permissions', icon: Users },
-          { id: 'config' as Tab, label: 'Config', icon: Settings },
+          { id: 'overview' as Tab,     label: 'Overview',      icon: BarChart3 },
+          { id: 'permissions' as Tab,  label: 'Permissions',   icon: Users },
+          { id: 'config' as Tab,       label: 'Config',        icon: Settings },
+          { id: 'reglog' as Tab,       label: 'Reg Log',       icon: ClipboardList },
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -35,6 +36,7 @@ export function AdminPage() {
       {tab === 'overview'    && <OverviewTab />}
       {tab === 'permissions' && <PermissionsTab />}
       {tab === 'config'      && <ConfigTab />}
+      {tab === 'reglog'      && <RegistrationLogTab />}
     </div>
   );
 }
@@ -390,6 +392,90 @@ function ConfigTab() {
         Save Config
       </button>
     </form>
+  );
+}
+
+// ── Registration Log ──────────────────────────────────────────────────────────
+
+interface RegLogEntry {
+  log_id: number;
+  discord_id: number;
+  username: string;
+  char_name: string;
+  char_class: string;
+  action: string;
+  source: string;
+  created_at: string;
+}
+
+const ACTION_BADGE: Record<string, string> = {
+  register: 'bg-green-900/40 text-green-300',
+  delete:   'bg-red-900/40 text-red-300',
+  update:   'bg-yellow-900/40 text-yellow-300',
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  web:          'Web',
+  discord:      'Discord',
+  'officer-web': 'Officer (Web)',
+};
+
+function RegistrationLogTab() {
+  const { data: entries = [], isLoading, error } = useQuery<RegLogEntry[]>({
+    queryKey: ['char-reg-log'],
+    queryFn: async () => (await api.get('/api/characters/log')).data,
+  });
+
+  if (isLoading) return <div className="text-gray-400 text-sm">Loading…</div>;
+  if (error)    return <div className="text-red-400 text-sm">Failed to load registration log.</div>;
+
+  return (
+    <div className="glass rounded-2xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-white/10 flex items-center gap-2">
+        <ClipboardList size={16} className="text-indigo-400" />
+        <h2 className="font-bold">Character Registration Log</h2>
+        <span className="ml-auto text-xs text-gray-500">{entries.length} entries</span>
+      </div>
+
+      {entries.length === 0 ? (
+        <p className="p-5 text-sm text-gray-400">No registrations recorded yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-gray-400 border-b border-white/10">
+                <th className="text-left px-4 py-2">Time (UTC)</th>
+                <th className="text-left px-4 py-2">User</th>
+                <th className="text-left px-4 py-2">Character</th>
+                <th className="text-left px-4 py-2">Class</th>
+                <th className="text-left px-4 py-2">Action</th>
+                <th className="text-left px-4 py-2">Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.log_id} className="border-b border-white/5 hover:bg-white/5">
+                  <td className="px-4 py-2 text-gray-400 whitespace-nowrap">
+                    {new Date(e.created_at + 'Z').toLocaleString()}
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className="font-medium">{e.username || `<@${e.discord_id}>`}</span>
+                  </td>
+                  <td className="px-4 py-2 font-semibold">{e.char_name}</td>
+                  <td className="px-4 py-2 text-gray-300">{e.char_class}</td>
+                  <td className="px-4 py-2">
+                    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${ACTION_BADGE[e.action] ?? 'bg-gray-700 text-gray-300'}`}>
+                      {e.action}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-gray-400 text-xs">{SOURCE_LABEL[e.source] ?? e.source}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
