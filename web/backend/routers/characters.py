@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from database.connection import get_db
-from database.queries import get_user_characters
-from middleware.auth import get_current_user
+from database.queries import get_user_characters, get_all_characters
+from middleware.auth import get_current_user, require_officer
 from models.schemas import CharacterCreate, CharacterUpdate
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
@@ -9,8 +9,12 @@ router = APIRouter(prefix="/api/characters", tags=["characters"])
 
 @router.get("")
 async def list_characters(user: dict = Depends(get_current_user)):
-    chars = await get_user_characters(int(user["user_id"]), int(user["guild_id"]))
-    return chars
+    return await get_user_characters(int(user["user_id"]), int(user["guild_id"]))
+
+
+@router.get("/roster")
+async def guild_roster(user: dict = Depends(require_officer)):
+    return await get_all_characters(int(user["guild_id"]))
 
 
 @router.post("", status_code=201)
@@ -19,7 +23,6 @@ async def create_character(body: CharacterCreate, user: dict = Depends(get_curre
     guild_id = int(user["guild_id"])
 
     async with get_db() as db:
-        # Check for duplicate
         cur = await db.execute(
             "SELECT 1 FROM characters WHERE discord_id=? AND guild_id=? AND char_name=?",
             (discord_id, guild_id, body.char_name),
@@ -27,7 +30,6 @@ async def create_character(body: CharacterCreate, user: dict = Depends(get_curre
         if await cur.fetchone():
             raise HTTPException(409, f"You already have a character named {body.char_name}")
 
-        # First character becomes main automatically
         cur2 = await db.execute(
             "SELECT COUNT(*) as cnt FROM characters WHERE discord_id=? AND guild_id=?",
             (discord_id, guild_id),
@@ -40,11 +42,9 @@ async def create_character(body: CharacterCreate, user: dict = Depends(get_curre
                (discord_id, guild_id, char_name, char_class, main_spec, off_spec,
                 is_main, ilvl, realm, region, professions, progression, raiderio_url)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                discord_id, guild_id, body.char_name, body.char_class, body.main_spec,
-                body.off_spec, is_main, body.ilvl, body.realm, body.region,
-                body.professions, body.progression, body.raiderio_url,
-            ),
+            (discord_id, guild_id, body.char_name, body.char_class, body.main_spec,
+             body.off_spec, is_main, body.ilvl, body.realm, body.region,
+             body.professions, body.progression, body.raiderio_url),
         )
         await db.commit()
 
@@ -98,7 +98,6 @@ async def delete_character(char_name: str, user: dict = Depends(get_current_user
             (discord_id, guild_id, char_name),
         )
 
-        # If we deleted the main, promote the next character
         if row["is_main"]:
             await db.execute(
                 """UPDATE characters SET is_main=1

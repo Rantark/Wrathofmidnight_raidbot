@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import CORS_ORIGINS, API_HOST, API_PORT
-from routers import auth, characters, events, attendance, admin
+from routers import auth, characters, events, attendance, admin, templates
 
 app = FastAPI(title="WoW Raid Bot API", version="1.0.0")
 
@@ -21,6 +21,7 @@ app.include_router(characters.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 app.include_router(attendance.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(templates.router, prefix="/api")
 
 
 @app.get("/")

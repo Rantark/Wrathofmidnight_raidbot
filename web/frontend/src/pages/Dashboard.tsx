@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { Users, Calendar, TrendingUp, Shield, ExternalLink } from 'lucide-react';
+import { Users, Calendar, TrendingUp, Shield, ExternalLink, PlusCircle, AlertCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { EventCard } from '@/components/Events/EventCard';
 import { AttendanceStatsCard } from '@/components/Attendance/AttendanceStats';
-import { formatRelativeDate } from '@/lib/utils';
-import type { RaidEvent, AttendanceHistory } from '@/types';
+import { classColor } from '@/lib/utils';
+import type { RaidEvent, AttendanceHistory, Character } from '@/types';
 
 export function Dashboard() {
   const { user, isOfficer, isRaidLeader } = useAuth();
@@ -29,6 +29,11 @@ export function Dashboard() {
     queryKey: ['admin-stats'],
     queryFn: () => api.get('/api/admin/stats').then((r) => r.data),
     enabled: isOfficer,
+  });
+
+  const { data: myChars = [] } = useQuery<Character[]>({
+    queryKey: ['characters'],
+    queryFn: () => api.get('/api/characters').then((r) => r.data),
   });
 
   return (
@@ -93,7 +98,7 @@ export function Dashboard() {
           )}
         </div>
 
-        {/* Right: attendance stats */}
+        {/* Right: attendance stats + characters + quick actions */}
         <div className="lg:col-span-2 space-y-4">
           <h2 className="font-bold text-lg">My Attendance</h2>
           {myStats ? (
@@ -104,16 +109,72 @@ export function Dashboard() {
             </div>
           )}
 
-          {/* Quick links */}
-          <div className="glass rounded-xl p-4 space-y-2">
+          {/* Characters summary */}
+          <div className="glass rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-gray-300">My Characters</p>
+              <a href="/characters" className="text-xs text-indigo-400 hover:text-indigo-300">
+                Manage →
+              </a>
+            </div>
+            {myChars.length === 0 ? (
+              <div className="text-center py-3">
+                <p className="text-xs text-gray-500 mb-2">No characters registered</p>
+                <a href="/characters" className="text-xs text-indigo-400 hover:text-indigo-300">
+                  Add your first character →
+                </a>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {myChars.slice(0, 4).map((c) => {
+                  const color = classColor(c.char_class);
+                  return (
+                    <div key={c.char_name} className="flex items-center gap-2">
+                      {c.avatar_url ? (
+                        <img src={c.avatar_url} alt="" className="w-7 h-7 rounded-md object-cover shrink-0" />
+                      ) : (
+                        <div
+                          className="w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0"
+                          style={{ background: `${color}22` }}
+                        >
+                          {c.char_name[0]}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold truncate" style={{ color }}>{c.char_name}</p>
+                        <p className="text-xs text-gray-500 truncate">{c.char_class} · {c.main_spec}</p>
+                      </div>
+                      {c.is_main === 1 && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 shrink-0">Main</span>
+                      )}
+                    </div>
+                  );
+                })}
+                {myChars.length > 4 && (
+                  <p className="text-xs text-gray-500 text-center pt-1">+{myChars.length - 4} more</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Quick actions */}
+          <div className="glass rounded-xl p-4 space-y-1">
             <p className="text-sm font-semibold text-gray-300 mb-3">Quick Actions</p>
+            {isRaidLeader && (
+              <a href="/events" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
+                <PlusCircle size={14} /> Create Raid Event
+              </a>
+            )}
+            <a href="/attendance" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
+              <AlertCircle size={14} /> Submit Absence
+            </a>
             <a href="/characters" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
               <Shield size={14} /> Manage Characters
             </a>
             <a href="/events" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
               <Calendar size={14} /> View All Events
             </a>
-            {(isRaidLeader || isOfficer) && (
+            {isOfficer && (
               <a href="/admin" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
                 <Users size={14} /> Admin Tools
               </a>

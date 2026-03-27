@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from database.connection import get_db
 from database.queries import get_attendance_stats, get_attendance_history, get_event
 from middleware.auth import get_current_user, require_raid_leader, require_officer
@@ -12,16 +12,12 @@ router = APIRouter(prefix="/api", tags=["attendance"])
 
 @router.get("/attendance/me")
 async def my_stats(user: dict = Depends(get_current_user)):
-    discord_id = int(user["user_id"])
-    guild_id = int(user["guild_id"])
-    return await get_attendance_stats(discord_id, guild_id)
+    return await get_attendance_stats(int(user["user_id"]), int(user["guild_id"]))
 
 
 @router.get("/attendance/me/history")
 async def my_history(user: dict = Depends(get_current_user)):
-    discord_id = int(user["user_id"])
-    guild_id = int(user["guild_id"])
-    return await get_attendance_history(discord_id, guild_id)
+    return await get_attendance_history(int(user["user_id"]), int(user["guild_id"]))
 
 
 # ── Absence requests ──────────────────────────────────────────────────────────
@@ -38,9 +34,11 @@ async def submit_absence(body: AbsenceCreate, user: dict = Depends(get_current_u
         raise HTTPException(400, "Event is no longer active")
 
     async with get_db() as db:
+        # Replace existing absence for the same event
         await db.execute(
             """INSERT INTO absences (discord_id, guild_id, event_id, reason, submitted_at)
-               VALUES (?,?,?,?,?)""",
+               VALUES (?,?,?,?,?)
+               ON CONFLICT DO NOTHING""",
             (discord_id, guild_id, body.event_id, body.reason,
              datetime.now(timezone.utc).isoformat()),
         )
@@ -61,6 +59,25 @@ async def my_absences(user: dict = Depends(get_current_user)):
                WHERE a.discord_id=? AND a.guild_id=?
                ORDER BY a.submitted_at DESC LIMIT 20""",
             (discord_id, guild_id),
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.get("/absences/event/{event_id}")
+async def event_absences(event_id: int, user: dict = Depends(require_raid_leader)):
+    guild_id = int(user["guild_id"])
+    event = await get_event(event_id, guild_id)
+    if not event:
+        raise HTTPException(404, "Event not found")
+    async with get_db() as db:
+        cur = await db.execute(
+            """SELECT a.*, e.event_name
+               FROM absences a
+               LEFT JOIN events e ON e.event_id = a.event_id
+               WHERE a.event_id=? AND a.guild_id=?
+               ORDER BY a.submitted_at ASC""",
+            (event_id, guild_id),
         )
         rows = await cur.fetchall()
     return [dict(r) for r in rows]
@@ -95,7 +112,11 @@ async def mark_attendance(body: AttendanceMarkRequest, user: dict = Depends(requ
 # ── Officer: reports ──────────────────────────────────────────────────────────
 
 @router.get("/attendance/report")
-async def low_attendance_report(user: dict = Depends(require_officer)):
+async def low_attendance_report(
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    user: dict = Depends(require_officer),
+):
     guild_id = int(user["guild_id"])
     async with get_db() as db:
         cur = await db.execute(
@@ -105,13 +126,22 @@ async def low_attendance_report(user: dict = Depends(require_officer)):
         row = await cur.fetchone()
         threshold = row["attendance_threshold"] if row else 75
 
-        # Get all unique members who have any attendance record in this guild
+        # Build date-filtered query
+        date_filter = ""
+        params: list = [guild_id]
+        if start_date:
+            date_filter += " AND e.event_date >= ?"
+            params.append(start_date)
+        if end_date:
+            date_filter += " AND e.event_date <= ?"
+            params.append(end_date)
+
         cur2 = await db.execute(
-            """SELECT DISTINCT a.discord_id
-               FROM attendance a
-               JOIN events e ON e.event_id = a.event_id
-               WHERE e.guild_id=?""",
-            (guild_id,),
+            f"""SELECT DISTINCT a.discord_id
+                FROM attendance a
+                JOIN events e ON e.event_id = a.event_id
+                WHERE e.guild_id=?{date_filter}""",
+            params,
         )
         member_rows = await cur2.fetchall()
 

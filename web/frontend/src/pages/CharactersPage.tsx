@@ -1,18 +1,34 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus } from 'lucide-react';
+import { Plus, Pencil, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import { CharacterCard } from '@/components/Characters/CharacterCard';
 import { CharacterForm } from '@/components/Characters/CharacterForm';
+import { Modal } from '@/components/common/Modal';
+import { classColor } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Character } from '@/types';
 
-export function CharactersPage() {
-  const [showForm, setShowForm] = useState(false);
-  const qc = useQueryClient();
+type Tab = 'mine' | 'roster';
 
-  const { data: characters = [], isLoading } = useQuery<Character[]>({
+export function CharactersPage() {
+  const { isOfficer } = useAuth();
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<Tab>('mine');
+  const [showForm, setShowForm] = useState(false);
+  const [editingChar, setEditingChar] = useState<Character | null>(null);
+
+  // My characters
+  const { data: myChars = [], isLoading: myLoading } = useQuery<Character[]>({
     queryKey: ['characters'],
     queryFn: () => api.get('/api/characters').then((r) => r.data),
+  });
+
+  // Guild roster (officers only)
+  const { data: rosterChars = [], isLoading: rosterLoading } = useQuery<Character[]>({
+    queryKey: ['characters-roster'],
+    queryFn: () => api.get('/api/characters/roster').then((r) => r.data),
+    enabled: isOfficer,
   });
 
   async function handleSetMain(charName: string) {
@@ -27,15 +43,39 @@ export function CharactersPage() {
   }
 
   return (
-    <div className="p-4 lg:p-8 max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-extrabold">My Characters</h1>
-        <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2 text-sm">
-          <Plus size={16} /> Add Character
-        </button>
+    <div className="p-4 lg:p-8 max-w-4xl mx-auto space-y-6">
+      {/* Header + tabs */}
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-extrabold flex-1">Characters</h1>
+        {tab === 'mine' && (
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="btn-primary flex items-center gap-2 text-sm"
+          >
+            <Plus size={16} /> Add Character
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      {/* Tab switcher (show only for officers) */}
+      {isOfficer && (
+        <div className="flex gap-1 p-1 glass rounded-xl w-fit">
+          {(['mine', 'roster'] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                tab === t ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              {t === 'mine' ? 'My Characters' : 'Guild Roster'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Add form */}
+      {tab === 'mine' && showForm && (
         <CharacterForm
           onSuccess={() => {
             setShowForm(false);
@@ -45,27 +85,237 @@ export function CharactersPage() {
         />
       )}
 
-      {isLoading ? (
-        <div className="text-center text-gray-500 py-12">Loading…</div>
-      ) : characters.length === 0 ? (
-        <div className="glass rounded-xl p-12 text-center">
-          <p className="text-gray-400 mb-4">No characters yet</p>
-          <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
-            Add your first character
-          </button>
+      {/* My Characters tab */}
+      {tab === 'mine' && (
+        myLoading ? (
+          <div className="text-center text-gray-500 py-12">Loading…</div>
+        ) : myChars.length === 0 ? (
+          <div className="glass rounded-xl p-12 text-center">
+            <p className="text-gray-400 mb-4">No characters yet</p>
+            <button onClick={() => setShowForm(true)} className="btn-primary text-sm">
+              Add your first character
+            </button>
+          </div>
+        ) : (
+          <div className="grid lg:grid-cols-2 gap-4">
+            {myChars.map((c) => (
+              <div key={c.char_name} className="relative group">
+                <CharacterCard
+                  character={c}
+                  onSetMain={() => handleSetMain(c.char_name)}
+                  onDelete={() => handleDelete(c.char_name)}
+                />
+                <button
+                  onClick={() => setEditingChar(c)}
+                  className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-lg
+                             text-gray-500 hover:text-white hover:bg-white/10 transition-all
+                             opacity-0 group-hover:opacity-100"
+                  title="Edit character"
+                >
+                  <Pencil size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* Guild Roster tab */}
+      {tab === 'roster' && isOfficer && (
+        <RosterTab characters={rosterChars} isLoading={rosterLoading} />
+      )}
+
+      {/* Edit modal */}
+      {editingChar && (
+        <Modal
+          title={`Edit ${editingChar.char_name}`}
+          onClose={() => setEditingChar(null)}
+        >
+          <EditCharacterForm
+            character={editingChar}
+            onSuccess={() => {
+              setEditingChar(null);
+              qc.invalidateQueries({ queryKey: ['characters'] });
+            }}
+            onCancel={() => setEditingChar(null)}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── Edit form ─────────────────────────────────────────────────────────────────
+
+function EditCharacterForm({
+  character,
+  onSuccess,
+  onCancel,
+}: {
+  character: Character;
+  onSuccess: () => void;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState({
+    main_spec: character.main_spec ?? '',
+    off_spec: character.off_spec ?? '',
+    ilvl: character.ilvl ? String(character.ilvl) : '',
+    professions: character.professions ?? '',
+    progression: character.progression ?? '',
+    raiderio_url: character.raiderio_url ?? '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await api.patch(`/api/characters/${encodeURIComponent(character.char_name)}`, {
+        main_spec: form.main_spec || undefined,
+        off_spec: form.off_spec || undefined,
+        ilvl: form.ilvl ? parseInt(form.ilvl) : undefined,
+        professions: form.professions || undefined,
+        progression: form.progression || undefined,
+        raiderio_url: form.raiderio_url || undefined,
+      });
+      onSuccess();
+    } catch (err: any) {
+      setError(err.response?.data?.detail ?? 'Update failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">Main Spec</label>
+          <input className="input" value={form.main_spec} onChange={(e) => setForm({ ...form, main_spec: e.target.value })} />
         </div>
-      ) : (
-        <div className="grid lg:grid-cols-2 gap-4">
-          {characters.map((c) => (
-            <CharacterCard
-              key={c.char_name}
-              character={c}
-              onSetMain={() => handleSetMain(c.char_name)}
-              onDelete={() => handleDelete(c.char_name)}
-            />
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">Off Spec</label>
+          <input className="input" value={form.off_spec} onChange={(e) => setForm({ ...form, off_spec: e.target.value })} placeholder="Optional" />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">Item Level</label>
+          <input type="number" min="1" max="700" className="input" value={form.ilvl} onChange={(e) => setForm({ ...form, ilvl: e.target.value })} />
+        </div>
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">Progression</label>
+          <input className="input" value={form.progression} onChange={(e) => setForm({ ...form, progression: e.target.value })} placeholder="8/8 M" />
+        </div>
+      </div>
+      <div>
+        <label className="text-xs text-gray-400 mb-1 block">Professions</label>
+        <input className="input" value={form.professions} onChange={(e) => setForm({ ...form, professions: e.target.value })} placeholder="Blacksmithing, Mining" />
+      </div>
+      <div>
+        <label className="text-xs text-gray-400 mb-1 block">Raider.IO URL</label>
+        <input className="input" value={form.raiderio_url} onChange={(e) => setForm({ ...form, raiderio_url: e.target.value })} placeholder="https://raider.io/characters/…" />
+      </div>
+
+      {error && <p className="text-red-400 text-xs">{error}</p>}
+
+      <div className="flex gap-2 pt-1">
+        <button type="submit" disabled={saving} className="btn-primary flex-1 flex items-center justify-center gap-2">
+          {saving && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+          Save Changes
+        </button>
+        <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+// ── Guild Roster tab ──────────────────────────────────────────────────────────
+
+function RosterTab({ characters, isLoading }: { characters: Character[]; isLoading: boolean }) {
+  const [search, setSearch] = useState('');
+  const [classFilter, setClassFilter] = useState('');
+
+  const filtered = characters.filter((c) => {
+    const matchSearch = !search || c.char_name.toLowerCase().includes(search.toLowerCase());
+    const matchClass  = !classFilter || c.char_class === classFilter;
+    return matchSearch && matchClass;
+  });
+
+  const grouped = filtered.reduce<Record<string, Character[]>>((acc, c) => {
+    (acc[c.char_class] ??= []).push(c);
+    return acc;
+  }, {});
+  const classes = Object.keys(grouped).sort();
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            className="input pl-9"
+            placeholder="Search character…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <select
+          className="input sm:max-w-[180px]"
+          value={classFilter}
+          onChange={(e) => setClassFilter(e.target.value)}
+        >
+          <option value="">All Classes</option>
+          {[...new Set(characters.map((c) => c.char_class))].sort().map((cl) => (
+            <option key={cl}>{cl}</option>
           ))}
+        </select>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center text-gray-500 py-8">Loading roster…</div>
+      ) : filtered.length === 0 ? (
+        <div className="glass rounded-xl p-8 text-center text-gray-500">No characters found</div>
+      ) : (
+        <div className="space-y-5">
+          {classes.map((cls) => {
+            const color = classColor(cls);
+            return (
+              <div key={cls}>
+                <h3 className="text-xs font-bold uppercase tracking-wider mb-2 px-1" style={{ color }}>
+                  {cls} ({grouped[cls].length})
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {grouped[cls].map((c) => (
+                    <div key={`${c.discord_id}-${c.char_name}`} className="glass rounded-xl p-3 flex items-center gap-3">
+                      {c.avatar_url ? (
+                        <img src={c.avatar_url} alt="" className="w-9 h-9 rounded-lg object-cover shrink-0" />
+                      ) : (
+                        <div
+                          className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold shrink-0"
+                          style={{ background: `${color}22`, border: `1px solid ${color}44` }}
+                        >
+                          {c.char_name[0]}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold truncate" style={{ color }}>{c.char_name}</p>
+                        <p className="text-xs text-gray-400 truncate">
+                          {c.main_spec}{c.off_spec ? ` / ${c.off_spec}` : ''}{c.ilvl ? ` · ${c.ilvl}` : ''}
+                        </p>
+                        {c.progression && <p className="text-xs text-indigo-400 truncate">{c.progression}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
+      <p className="text-center text-xs text-gray-600">{characters.length} total characters</p>
     </div>
   );
 }

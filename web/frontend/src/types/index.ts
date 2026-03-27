@@ -97,6 +97,39 @@ export interface Absence {
   submitted_at: string;
 }
 
+export interface Template {
+  template_id: number;
+  guild_id: string;
+  template_name: string;
+  event_name: string;
+  event_type: string;
+  event_time: string;
+  description?: string;
+  max_tanks: number;
+  max_healers: number;
+  max_dps: number;
+  created_by: string;
+}
+
+export interface Permission {
+  discord_id: string;
+  role: 'raid_leader' | 'officer';
+  username?: string;
+}
+
+export interface GuildConfig {
+  guild_id: number;
+  event_channel_id?: number;
+  log_channel_id?: number;
+  attendance_threshold: number;
+  timezone: string;
+  default_max_tanks: number;
+  default_max_healers: number;
+  default_max_dps: number;
+  roster_channel_id?: number;
+  roster_message_id?: number;
+}
+
 export const CLASS_COLORS: Record<string, string> = {
   Warrior: '#C79C6E',
   Paladin: '#F58CBA',
@@ -118,6 +151,18 @@ export const ROLE_ICONS: Record<string, string> = {
   healer: '💚',
   dps: '⚔️',
 };
+
+export const EVENT_TYPES = [
+  'Normal Raid',
+  'Heroic Raid',
+  'Mythic Raid',
+  'Mythic+ Night',
+  'PvP - RBG',
+  'PvP - Arena',
+  'Achievement Run',
+  'Alt Raid',
+  'Social Event',
+] as const;
 
 export const EVENT_TYPE_COLORS: Record<string, string> = {
   'Mythic Raid': '#ef4444',
