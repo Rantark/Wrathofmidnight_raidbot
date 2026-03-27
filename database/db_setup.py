@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS guild_settings (
     default_max_healers   INTEGER DEFAULT 5,
     default_max_dps       INTEGER DEFAULT 13,
     roster_channel_id     INTEGER,
-    roster_message_id     INTEGER
+    roster_message_id     INTEGER,
+    char_reg_channel_id   INTEGER,
+    char_reg_message_id   INTEGER
 );
 
 -- ── Raid leader / officer roles ─────────────────────────────────────────────
@@ -226,6 +228,8 @@ async def init_db(db_path: str) -> None:
             # Public roster embed tracking in guild settings
             "ALTER TABLE guild_settings ADD COLUMN roster_channel_id INTEGER",
             "ALTER TABLE guild_settings ADD COLUMN roster_message_id INTEGER",
+            "ALTER TABLE guild_settings ADD COLUMN char_reg_channel_id INTEGER",
+            "ALTER TABLE guild_settings ADD COLUMN char_reg_message_id INTEGER",
             "ALTER TABLE recurring_events ADD COLUMN last_posted_date TEXT",
             "ALTER TABLE characters ADD COLUMN raiderio_url TEXT",
             # Track Discord message IDs for posted reminder messages so old ones can be deleted

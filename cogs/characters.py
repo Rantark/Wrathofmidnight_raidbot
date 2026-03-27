@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from typing import Optional
 
 import config
@@ -18,6 +18,64 @@ from utils import blizzard as bnet
 from utils import raiderio as rio
 from utils.constants import VALID_SPECS, ALL_SPECS, CLASS_COLORS
 from utils.validators import validate_class, validate_spec, validate_ilvl, validate_char_name
+
+
+WEBSITE_URL = "https://raids.wrathofmidnight.org"
+
+
+class RegistrationView(discord.ui.View):
+    """Persistent view attached to the registration channel pinned message."""
+
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(
+            label="Register on Website",
+            style=discord.ButtonStyle.link,
+            url=WEBSITE_URL,
+            emoji="🌐",
+        ))
+
+    @discord.ui.button(
+        label="How to Register",
+        style=discord.ButtonStyle.secondary,
+        custom_id="char_reg_help",
+        emoji="💬",
+    )
+    async def help_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="📋  Character Registration",
+                description=(
+                    "**Option 1 — Web Portal (Recommended)**\n"
+                    f"Visit [{WEBSITE_URL}]({WEBSITE_URL}) and log in with Discord "
+                    "to register and manage your characters.\n\n"
+                    "**Option 2 — Discord Slash Command**\n"
+                    "Use `/character add` directly in Discord:\n"
+                    "```\n/character add name:Thrall realm:Stormrage\n```\n"
+                    "Or paste your Raider.IO URL with `/character link`."
+                ),
+                color=0x5865F2,
+            ),
+            ephemeral=True,
+        )
+
+
+def _build_registration_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="⚔️  Start Character Registration Here",
+        description=(
+            "Register your World of Warcraft characters so raid leaders can build optimal rosters!\n\n"
+            f"**🌐 Web Portal:** [{WEBSITE_URL}]({WEBSITE_URL})\n"
+            "Log in with Discord for the full experience — manage multiple characters, "
+            "view attendance stats, and more.\n\n"
+            "**💬 Discord Command:** `/character add`\n"
+            "Quick registration without leaving Discord.\n\n"
+            "Click **How to Register** below for step-by-step instructions."
+        ),
+        color=0x5865F2,
+    )
+    embed.set_footer(text="Only your registration reply will be kept — all other messages are auto-deleted.")
+    return embed
 
 
 async def is_officer(interaction: discord.Interaction) -> bool:
@@ -44,6 +102,48 @@ class Characters(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        self.bot.add_view(RegistrationView())  # re-attach persistent view on restart
+
+    async def cog_load(self) -> None:
+        self._restore_reg_messages.start()
+
+    async def cog_unload(self) -> None:
+        self._restore_reg_messages.cancel()
+
+    @tasks.loop(count=1)
+    async def _restore_reg_messages(self) -> None:
+        """Restore registration messages that may have been lost while the bot was offline."""
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
+            await self._ensure_registration_message(guild.id)
+
+    async def _ensure_registration_message(self, guild_id: int) -> None:
+        """Post or restore the registration channel pinned message if it's gone."""
+        settings = await queries.get_guild_settings(config.DATABASE_PATH, guild_id)
+        channel_id = settings.get("char_reg_channel_id")
+        message_id = settings.get("char_reg_message_id")
+        if not channel_id:
+            return
+        channel = self.bot.get_channel(channel_id)
+        if not channel:
+            return
+        # Check if the message still exists
+        if message_id:
+            try:
+                await channel.fetch_message(message_id)
+                return  # message is fine
+            except (discord.NotFound, discord.Forbidden):
+                pass
+        # Post a new registration message
+        try:
+            msg = await channel.send(embed=_build_registration_embed(), view=RegistrationView())
+            await queries.update_guild_setting(config.DATABASE_PATH, guild_id, "char_reg_message_id", msg.id)
+            try:
+                await msg.pin()
+            except Exception:
+                pass
+        except Exception as exc:
+            log.warning("Could not post registration message in guild %s: %s", guild_id, exc)
 
     async def _refresh_roster_embed(self, guild_id: int) -> None:
         """Edit the pinned public roster embed if one has been posted."""
@@ -764,6 +864,54 @@ class Characters(commands.Cog):
         )
         embed = embeds.build_character_list_embed(member.display_name, chars)
         await interaction.followup.send(embed=embed)
+
+    @char_group.command(name="setup_registration_channel", description="Set a channel as the character registration channel (officers only)")
+    @app_commands.describe(channel="The channel to use for character registration")
+    async def character_setup_registration_channel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+    ) -> None:
+        if not await is_officer(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only officers can configure the registration channel."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Save channel setting
+        await queries.update_guild_setting(config.DATABASE_PATH, interaction.guild_id, "char_reg_channel_id", channel.id)
+        # Clear any stale message ID so a fresh one is posted
+        await queries.update_guild_setting(config.DATABASE_PATH, interaction.guild_id, "char_reg_message_id", None)
+
+        # Post the registration message
+        await self._ensure_registration_message(interaction.guild_id)
+
+        await interaction.followup.send(
+            embed=embeds.success_embed(
+                "Registration Channel Set",
+                f"{channel.mention} is now the character registration channel.\n"
+                "A pinned registration prompt has been posted there.\n"
+                "Non-bot messages in that channel will be automatically deleted.",
+            ),
+            ephemeral=True,
+        )
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Delete non-bot messages posted in the character registration channel."""
+        if message.author.bot or not message.guild:
+            return
+        settings = await queries.get_guild_settings(config.DATABASE_PATH, message.guild.id)
+        reg_channel_id = settings.get("char_reg_channel_id")
+        if not reg_channel_id or message.channel.id != reg_channel_id:
+            return
+        try:
+            await message.delete()
+        except (discord.NotFound, discord.Forbidden):
+            pass
 
     @char_group.command(name="roster", description="List all registered characters in this server (officers only)")
     async def character_roster(self, interaction: discord.Interaction) -> None:

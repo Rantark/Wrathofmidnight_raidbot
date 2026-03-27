@@ -70,6 +70,7 @@ async def update_guild_setting(db_path: str, guild_id: int, key: str, value: Any
         "event_channel_id", "log_channel_id", "attendance_threshold",
         "timezone", "default_max_tanks", "default_max_healers", "default_max_dps",
         "roster_channel_id", "roster_message_id",
+        "char_reg_channel_id", "char_reg_message_id",
     }
     if key not in allowed:
         raise ValueError(f"Unknown setting key: {key}")
