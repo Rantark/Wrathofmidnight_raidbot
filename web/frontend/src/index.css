@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { @apply scroll-smooth; }
+  body {
+    @apply bg-gray-950 text-gray-100 font-sans antialiased;
+    background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
+    min-height: 100vh;
+  }
+  * { @apply box-border; }
+}
+
+@layer components {
+  .glass {
+    background: rgba(31, 41, 55, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(75, 85, 99, 0.4);
+  }
+
+  .glass-dark {
+    background: rgba(17, 24, 39, 0.8);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(55, 65, 81, 0.5);
+  }
+
+  .gradient-blue  { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+  .gradient-green { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+  .gradient-orange{ background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+  .gradient-red   { background: linear-gradient(135deg, #fc466b 0%, #3f5efb 100%); }
+  .gradient-teal  { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-gray-300
+           transition-all duration-200 hover:bg-white/10 hover:text-white cursor-pointer;
+  }
+  .nav-item.active {
+    @apply bg-white/15 text-white font-semibold;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200
+           bg-indigo-600 hover:bg-indigo-500 active:scale-95 disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200
+           glass hover:bg-white/10 active:scale-95 disabled:opacity-50;
+  }
+  .btn-danger {
+    @apply px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200
+           bg-red-600/80 hover:bg-red-500 active:scale-95 disabled:opacity-50;
+  }
+
+  .input {
+    @apply w-full px-4 py-2.5 rounded-xl text-sm glass text-gray-100 placeholder-gray-500
+           focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold;
+  }
+
+  .card { @apply glass rounded-2xl p-4 lg:p-6 animate-fade-in; }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-gray-700 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-gray-600; }

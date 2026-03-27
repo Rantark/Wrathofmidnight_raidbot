@@ -1,0 +1,62 @@
+# /etc/nginx/sites-available/raidbot
+# Replace raids.yourwowguild.com with your actual domain.
+
+server {
+    listen 80;
+    server_name raids.yourwowguild.com;
+    # Redirect HTTP → HTTPS (Cloudflare Tunnel handles TLS, so this may be optional)
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name raids.yourwowguild.com;
+
+    # TLS — managed by Certbot or Cloudflare Origin Certificate
+    ssl_certificate     /etc/ssl/certs/raidbot.crt;
+    ssl_certificate_key /etc/ssl/private/raidbot.key;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Content-Type-Options "nosniff";
+    add_header Referrer-Policy "strict-origin-when-cross-origin";
+
+    # ── FastAPI back-end ─────────────────────────────────────────────────────
+    location /api/ {
+        proxy_pass         http://127.0.0.1:8001/api/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+
+    location /auth/ {
+        proxy_pass         http://127.0.0.1:8001/auth/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
+    # ── React front-end ──────────────────────────────────────────────────────
+    root /home/pi/Wrathofmidnight_raidbot/web/frontend/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Cache static assets aggressively
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Gzip
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
+    gzip_min_length 1024;
+}
