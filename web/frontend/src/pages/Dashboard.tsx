@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Users, Calendar, TrendingUp, Shield, ExternalLink, PlusCircle, AlertCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -61,9 +62,9 @@ export function Dashboard() {
         <div className="lg:col-span-3 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-lg">Upcoming Raids</h2>
-            <a href="/events" className="text-indigo-400 text-sm hover:text-indigo-300 flex items-center gap-1">
+            <Link to="/events" className="text-indigo-400 text-sm hover:text-indigo-300 flex items-center gap-1">
               View all <ExternalLink size={12} />
-            </a>
+            </Link>
           </div>
 
           {events.length === 0 ? (
@@ -113,16 +114,16 @@ export function Dashboard() {
           <div className="glass rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm font-semibold text-gray-300">My Characters</p>
-              <a href="/characters" className="text-xs text-indigo-400 hover:text-indigo-300">
+              <Link to="/characters" className="text-xs text-indigo-400 hover:text-indigo-300">
                 Manage →
-              </a>
+              </Link>
             </div>
             {myChars.length === 0 ? (
               <div className="text-center py-3">
                 <p className="text-xs text-gray-500 mb-2">No characters registered</p>
-                <a href="/characters" className="text-xs text-indigo-400 hover:text-indigo-300">
+                <Link to="/characters" className="text-xs text-indigo-400 hover:text-indigo-300">
                   Add your first character →
-                </a>
+                </Link>
               </div>
             ) : (
               <div className="space-y-2">
@@ -161,23 +162,23 @@ export function Dashboard() {
           <div className="glass rounded-xl p-4 space-y-1">
             <p className="text-sm font-semibold text-gray-300 mb-3">Quick Actions</p>
             {isRaidLeader && (
-              <a href="/events" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
+              <Link to="/events" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
                 <PlusCircle size={14} /> Create Raid Event
-              </a>
+              </Link>
             )}
-            <a href="/attendance" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
+            <Link to="/attendance" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
               <AlertCircle size={14} /> Submit Absence
-            </a>
-            <a href="/characters" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
+            </Link>
+            <Link to="/characters" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
               <Shield size={14} /> Manage Characters
-            </a>
-            <a href="/events" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
+            </Link>
+            <Link to="/events" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
               <Calendar size={14} /> View All Events
-            </a>
+            </Link>
             {isOfficer && (
-              <a href="/admin" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
+              <Link to="/admin" className="flex items-center gap-2 text-sm text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors">
                 <Users size={14} /> Admin Tools
-              </a>
+              </Link>
             )}
           </div>
         </div>
