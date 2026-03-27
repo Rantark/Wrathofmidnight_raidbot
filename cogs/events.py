@@ -453,9 +453,11 @@ class Events(commands.Cog):
                 self.bot.add_view(SignupView(eid, self.bot))
         log.info("Re-registered persistent views for %d active event(s)", len(active_events))
         self.recurring_loop.start()
+        self.web_actions_loop.start()
 
     async def cog_unload(self) -> None:
         self.recurring_loop.cancel()
+        self.web_actions_loop.cancel()
 
     # ── /raid ─────────────────────────────────────────────────────────────────
     raid_group = app_commands.Group(name="raid", description="Raid and event management")
@@ -1622,6 +1624,159 @@ class Events(commands.Cog):
 
         embed.set_footer(text="Use /raid bosses set to assign any raid to an event")
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ── Web portal → Discord bridge ────────────────────────────────────────────
+
+    @tasks.loop(seconds=5)
+    async def web_actions_loop(self) -> None:
+        """
+        Poll the web_actions table for actions queued by the web portal and
+        execute the corresponding Discord operation (post / update / cancel / delete).
+        """
+        import json
+        try:
+            pending = await queries.get_pending_web_actions(config.DATABASE_PATH)
+        except Exception:
+            log.exception("web_actions_loop: failed to fetch pending actions")
+            return
+
+        for action in pending:
+            try:
+                await self._process_web_action(action)
+            except Exception:
+                log.exception("web_actions_loop: error processing action_id=%d", action["action_id"])
+            finally:
+                await queries.mark_web_action_processed(config.DATABASE_PATH, action["action_id"])
+
+    @web_actions_loop.before_loop
+    async def before_web_actions_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _process_web_action(self, action: dict) -> None:
+        import json
+        action_type = action["action"]
+        event_id    = action.get("event_id")
+        guild_id    = action.get("guild_id")
+
+        try:
+            payload = json.loads(action.get("payload") or "{}")
+        except (ValueError, TypeError):
+            payload = {}
+
+        if action_type == "post_event":
+            await self._web_post_event(event_id, guild_id)
+        elif action_type == "update_event":
+            await _refresh_event_embed(self.bot, event_id)
+        elif action_type == "cancel_event":
+            await self._web_cancel_event(event_id, payload.get("reason", ""))
+        elif action_type == "delete_event":
+            await self._web_delete_event(
+                payload.get("channel_id"),
+                payload.get("message_id"),
+            )
+        else:
+            log.warning("web_actions_loop: unknown action type %r", action_type)
+
+    async def _web_post_event(self, event_id: int, guild_id: int) -> None:
+        """Post a new event embed to Discord after it was created via the web portal."""
+        event = await queries.get_event(config.DATABASE_PATH, event_id)
+        if not event:
+            log.warning("web_actions: post_event called for missing event_id=%d", event_id)
+            return
+
+        # Determine target channel: use event's stored channel_id, else guild default
+        channel_id = event.get("channel_id")
+        if not channel_id:
+            guild_settings = await queries.get_guild_settings(config.DATABASE_PATH, guild_id)
+            channel_id = guild_settings.get("event_channel_id") if guild_settings else None
+        if not channel_id:
+            log.warning("web_actions: no channel configured for guild %d — cannot post event %d", guild_id, event_id)
+            return
+
+        channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+        if not channel:
+            log.warning("web_actions: channel %d not found for event %d", channel_id, event_id)
+            return
+
+        guild_settings = await queries.get_guild_settings(config.DATABASE_PATH, guild_id)
+        tz_name = (guild_settings or {}).get("timezone") or config.TIMEZONE or "America/New_York"
+        tz_label = _tz_abbrev(tz_name, event["event_date"], event["event_time"])
+
+        empty_signups: dict = {"tanks": [], "healers": [], "dps": [], "bench": [], "tentative": [], "declined": []}
+        embed = embeds.build_event_embed(event, empty_signups, tz_label=tz_label)
+
+        view = SocialSignupView(event_id, self.bot) if event.get("event_type") in SOCIAL_EVENT_TYPES else SignupView(event_id, self.bot)
+        msg = await channel.send(embed=embed, view=view)
+        await queries.set_event_message(config.DATABASE_PATH, event_id, msg.id, channel.id)
+        log.info("web_actions: posted event %d to channel %d (message %d)", event_id, channel.id, msg.id)
+
+        # Schedule reminders now that we know the event date/time
+        guild_tz = _get_guild_tz(tz_name)
+        try:
+            event_dt = guild_tz.localize(
+                datetime.strptime(f"{event['event_date']} {event['event_time']}", "%Y-%m-%d %H:%M")
+            )
+            from datetime import timezone as _tz
+            fire_times = []
+            for label, seconds in REMINDER_INTERVALS.items():
+                fire_dt = event_dt - timedelta(seconds=seconds)
+                if fire_dt > datetime.now(_tz.utc):
+                    fire_times.append((fire_dt.astimezone(_tz.utc).isoformat(), label))
+            if fire_times:
+                await queries.schedule_reminders(config.DATABASE_PATH, event_id, fire_times)
+        except Exception:
+            log.exception("web_actions: failed to schedule reminders for event %d", event_id)
+
+    async def _web_cancel_event(self, event_id: int, reason: str) -> None:
+        """Edit or delete the Discord embed for a cancelled event."""
+        event = await queries.get_event(config.DATABASE_PATH, event_id)
+        if not event:
+            return
+
+        message_id = event.get("message_id")
+        channel_id = event.get("channel_id")
+        if not message_id or not channel_id:
+            return
+
+        channel = self.bot.get_channel(channel_id)
+        if not channel:
+            return
+
+        try:
+            msg = await channel.fetch_message(message_id)
+        except discord.NotFound:
+            return
+
+        if reason:
+            cancelled_embed = discord.Embed(
+                title=f"❌  CANCELLED: {event['event_name']}",
+                description=f"This event has been cancelled.\n\n**Reason:** {reason}",
+                color=0xE74C3C,
+            )
+            await msg.edit(embed=cancelled_embed, view=None)
+            from datetime import timezone as _tz
+            delete_at = (datetime.now(_tz.utc) + timedelta(hours=24)).isoformat()
+            await queries.add_scheduled_deletion(config.DATABASE_PATH, channel.id, msg.id, delete_at)
+        else:
+            await msg.delete()
+
+        log.info("web_actions: handled cancel for event %d (reason=%r)", event_id, reason)
+
+    async def _web_delete_event(self, channel_id: int | None, message_id: int | None) -> None:
+        """Delete a Discord event embed that was removed via the web portal."""
+        if not channel_id or not message_id:
+            return
+        channel = self.bot.get_channel(channel_id)
+        if not channel:
+            return
+        try:
+            msg = await channel.fetch_message(message_id)
+            await msg.delete()
+            log.info("web_actions: deleted message %d in channel %d", message_id, channel_id)
+        except discord.NotFound:
+            pass
+        except discord.Forbidden:
+            log.warning("web_actions: no permission to delete message %d in channel %d", message_id, channel_id)
 
 
 async def setup(bot: commands.Bot) -> None:

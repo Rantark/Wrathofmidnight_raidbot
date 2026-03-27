@@ -900,3 +900,23 @@ async def set_boss_embed(
         "UPDATE events SET boss_message_id=?, boss_channel_id=? WHERE event_id=?",
         (message_id, channel_id, event_id),
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Web → Discord action queue
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def get_pending_web_actions(db_path: str) -> list[dict]:
+    """Return unprocessed web_actions ordered by creation time."""
+    return await _fetchall(
+        db_path,
+        "SELECT * FROM web_actions WHERE processed=0 ORDER BY created_at ASC",
+    )
+
+
+async def mark_web_action_processed(db_path: str, action_id: int) -> None:
+    await _execute(
+        db_path,
+        "UPDATE web_actions SET processed=1 WHERE action_id=?",
+        (action_id,),
+    )

@@ -1,6 +1,7 @@
+import json
 from fastapi import APIRouter, HTTPException, Depends, Query
 from database.connection import get_db
-from database.queries import get_active_events, get_event, get_event_signups, get_guild_settings
+from database.queries import get_active_events, get_event, get_event_signups, get_guild_settings, queue_web_action
 from middleware.auth import get_current_user, require_raid_leader
 from models.schemas import EventCreate, EventUpdate, EventCancel
 
@@ -88,6 +89,7 @@ async def create_event(body: EventCreate, user: dict = Depends(require_raid_lead
         await db.commit()
         event_id = cur.lastrowid
 
+    await queue_web_action(guild_id, "post_event", event_id)
     return {"message": "Event created", "event_id": event_id}
 
 
@@ -113,6 +115,7 @@ async def edit_event(event_id: int, body: EventUpdate, user: dict = Depends(requ
         )
         await db.commit()
 
+    await queue_web_action(guild_id, "update_event", event_id)
     return {"message": "Event updated"}
 
 
@@ -122,6 +125,13 @@ async def delete_event(event_id: int, user: dict = Depends(require_raid_leader))
     event = await get_event(event_id, guild_id)
     if not event:
         raise HTTPException(404, "Event not found")
+
+    # Queue Discord deletion BEFORE removing the row (we need channel/message IDs)
+    payload = json.dumps({
+        "channel_id": event.get("channel_id"),
+        "message_id": event.get("message_id"),
+    })
+    await queue_web_action(guild_id, "delete_event", event_id, payload)
 
     async with get_db() as db:
         await db.execute(
@@ -148,6 +158,7 @@ async def toggle_lock(event_id: int, user: dict = Depends(require_raid_leader)):
         )
         await db.commit()
 
+    await queue_web_action(guild_id, "update_event", event_id)
     return {"message": "Roster unlocked" if new_lock == 0 else "Roster locked", "locked": new_lock}
 
 
@@ -172,4 +183,8 @@ async def cancel_event(event_id: int, body: EventCancel, user: dict = Depends(re
         )
         await db.commit()
 
+    await queue_web_action(
+        guild_id, "cancel_event", event_id,
+        json.dumps({"reason": body.reason or ""}),
+    )
     return {"message": "Event cancelled"}

@@ -109,6 +109,16 @@ async def get_attendance_stats(discord_id: int, guild_id: int) -> dict:
     }
 
 
+async def queue_web_action(guild_id: int, action: str, event_id: int | None = None, payload: str = "{}") -> None:
+    """Insert a pending action for the Discord bot to pick up and execute."""
+    async with get_db() as db:
+        await db.execute(
+            "INSERT INTO web_actions (guild_id, action, event_id, payload) VALUES (?,?,?,?)",
+            (guild_id, action, event_id, payload),
+        )
+        await db.commit()
+
+
 async def get_attendance_history(discord_id: int, guild_id: int, limit: int = 20) -> list[dict]:
     async with get_db() as db:
         cur = await db.execute(

@@ -177,6 +177,21 @@ CREATE TABLE IF NOT EXISTS recurring_events (
     last_posted_date TEXT    -- YYYY-MM-DD of the event_date last auto-created
 );
 
+-- ── Web → Discord action queue ───────────────────────────────────────────────
+-- The web portal writes rows here; the bot's background task reads and acts on them.
+-- action: 'post_event' | 'update_event' | 'cancel_event' | 'delete_event'
+-- payload: JSON string with extra data (e.g. channel_id/message_id for deletes, reason for cancel)
+CREATE TABLE IF NOT EXISTS web_actions (
+    action_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id   INTEGER NOT NULL,
+    action     TEXT    NOT NULL,
+    event_id   INTEGER,
+    payload    TEXT    DEFAULT '{}',
+    created_at TEXT    NOT NULL DEFAULT (datetime('now','utc')),
+    processed  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_web_actions_pending ON web_actions(processed, created_at);
+
 -- ── Indexes ──────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_event_bosses_event   ON event_bosses(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_channels_guild ON event_channels(guild_id);
@@ -219,6 +234,24 @@ async def init_db(db_path: str) -> None:
             # Per-event accent color (integer Discord color) so simultaneous events are visually distinct
             "ALTER TABLE events ADD COLUMN color INTEGER",
         ]
+        # Idempotent CREATE for tables added after initial schema (can't use ALTER TABLE)
+        new_tables = [
+            """CREATE TABLE IF NOT EXISTS web_actions (
+                action_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id   INTEGER NOT NULL,
+                action     TEXT    NOT NULL,
+                event_id   INTEGER,
+                payload    TEXT    DEFAULT '{}',
+                created_at TEXT    NOT NULL DEFAULT (datetime('now','utc')),
+                processed  INTEGER NOT NULL DEFAULT 0
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_web_actions_pending ON web_actions(processed, created_at)",
+        ]
+        for sql in new_tables:
+            try:
+                await db.execute(sql)
+            except Exception:
+                pass
         for sql in migrations:
             try:
                 await db.execute(sql)
