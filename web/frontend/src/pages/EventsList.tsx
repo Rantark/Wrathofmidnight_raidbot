@@ -424,6 +424,7 @@ function EventForm({
     event_time: (initialValues?.event_time ?? '').slice(0, 5),
     event_type: initialValues?.event_type ?? 'Heroic Raid',
     description: initialValues?.description ?? '',
+    channel_id: initialValues?.channel_id ? String(initialValues.channel_id) : '',
     max_tanks: String(initialValues?.max_tanks ?? ''),
     max_healers: String(initialValues?.max_healers ?? ''),
     max_dps: String(initialValues?.max_dps ?? ''),
@@ -431,11 +432,24 @@ function EventForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const { data: channels = [] } = useQuery<{ channel_id: number; label: string }[]>({
+    queryKey: ['event-channels'],
+    queryFn: () => api.get('/api/events/channels').then((r) => r.data),
+    enabled: !isEdit,
+  });
+
+  // Pre-select first channel when list loads and nothing is picked yet
+  const [channelInitialised, setChannelInitialised] = useState(false);
+  if (!channelInitialised && channels.length > 0 && !form.channel_id) {
+    setForm((f) => ({ ...f, channel_id: String(channels[0].channel_id) }));
+    setChannelInitialised(true);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError('');
-    const payload = {
+    const payload: Record<string, unknown> = {
       event_name: form.event_name,
       event_date: form.event_date,
       event_time: form.event_time,
@@ -445,6 +459,9 @@ function EventForm({
       max_healers: form.max_healers ? parseInt(form.max_healers) : undefined,
       max_dps: form.max_dps ? parseInt(form.max_dps) : undefined,
     };
+    if (!isEdit && form.channel_id) {
+      payload.channel_id = parseInt(form.channel_id);
+    }
     try {
       if (isEdit) {
         await api.put(`/api/events/${eventId}`, payload);
@@ -506,6 +523,39 @@ function EventForm({
           {EVENT_TYPES.map((t) => <option key={t}>{t}</option>)}
         </select>
       </div>
+
+      {/* Channel picker — only shown on create; edit keeps existing channel */}
+      {!isEdit && (
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">
+            Discord Channel *
+            <span className="ml-1 text-gray-600">(where the event embed will be posted)</span>
+          </label>
+          {channels.length > 0 ? (
+            <select
+              className="input"
+              value={form.channel_id}
+              onChange={(e) => setForm({ ...form, channel_id: e.target.value })}
+              required
+            >
+              <option value="">Select a channel…</option>
+              {channels.map((c) => (
+                <option key={c.channel_id} value={String(c.channel_id)}>
+                  {c.label || `#${c.channel_id}`}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className="input"
+              placeholder="Discord channel ID (e.g. 123456789012345678)"
+              value={form.channel_id}
+              onChange={(e) => setForm({ ...form, channel_id: e.target.value })}
+              required
+            />
+          )}
+        </div>
+      )}
 
       <div>
         <label className="text-xs text-gray-400 mb-1 block">Description</label>

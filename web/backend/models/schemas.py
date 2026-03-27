@@ -55,6 +55,7 @@ class EventCreate(BaseModel):
     event_time: str   # HH:MM
     event_type: str
     description: Optional[str] = None
+    channel_id: Optional[int] = None   # Discord channel to post in; falls back to guild default
     max_tanks: Optional[int] = None
     max_healers: Optional[int] = None
     max_dps: Optional[int] = None

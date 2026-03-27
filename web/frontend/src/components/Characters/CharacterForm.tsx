@@ -10,9 +10,10 @@ const WOW_CLASSES = [
 interface Props {
   onSuccess: () => void;
   onCancel: () => void;
+  officerTargetDiscordId?: number;  // When set, officer is creating a char for this member
 }
 
-export function CharacterForm({ onSuccess, onCancel }: Props) {
+export function CharacterForm({ onSuccess, onCancel, officerTargetDiscordId }: Props) {
   const [form, setForm] = useState({
     char_name: '',
     char_class: '',
@@ -31,13 +32,18 @@ export function CharacterForm({ onSuccess, onCancel }: Props) {
     setSaving(true);
     setError('');
     try {
-      await api.post('/api/characters', {
+      const body = {
         ...form,
         ilvl: form.ilvl ? parseInt(form.ilvl) : undefined,
         off_spec: form.off_spec || undefined,
         realm: form.realm || undefined,
         progression: form.progression || undefined,
-      });
+      };
+      if (officerTargetDiscordId) {
+        await api.post(`/api/characters/officer?target_discord_id=${officerTargetDiscordId}`, body);
+      } else {
+        await api.post('/api/characters', body);
+      }
       onSuccess();
     } catch (err: any) {
       setError(err.response?.data?.detail ?? 'Failed to create character');

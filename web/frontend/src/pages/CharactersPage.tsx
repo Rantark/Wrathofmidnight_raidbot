@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Search } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, UserPlus } from 'lucide-react';
 import { api } from '@/lib/api';
 import { CharacterCard } from '@/components/Characters/CharacterCard';
 import { CharacterForm } from '@/components/Characters/CharacterForm';
@@ -122,7 +122,12 @@ export function CharactersPage() {
 
       {/* Guild Roster tab */}
       {tab === 'roster' && isOfficer && (
-        <RosterTab characters={rosterChars} isLoading={rosterLoading} />
+        <RosterTab
+          characters={rosterChars}
+          isLoading={rosterLoading}
+          onEdit={(c) => setEditingChar(c)}
+          onDeleted={() => qc.invalidateQueries({ queryKey: ['characters-roster'] })}
+        />
       )}
 
       {/* Edit modal */}
@@ -133,9 +138,14 @@ export function CharactersPage() {
         >
           <EditCharacterForm
             character={editingChar}
+            officerMode={tab === 'roster'}
             onSuccess={() => {
               setEditingChar(null);
-              qc.invalidateQueries({ queryKey: ['characters'] });
+              if (tab === 'roster') {
+                qc.invalidateQueries({ queryKey: ['characters-roster'] });
+              } else {
+                qc.invalidateQueries({ queryKey: ['characters'] });
+              }
             }}
             onCancel={() => setEditingChar(null)}
           />
@@ -151,10 +161,12 @@ function EditCharacterForm({
   character,
   onSuccess,
   onCancel,
+  officerMode = false,
 }: {
   character: Character;
   onSuccess: () => void;
   onCancel: () => void;
+  officerMode?: boolean;
 }) {
   const [form, setForm] = useState({
     main_spec: character.main_spec ?? '',
@@ -172,14 +184,22 @@ function EditCharacterForm({
     setSaving(true);
     setError('');
     try {
-      await api.patch(`/api/characters/${encodeURIComponent(character.char_name)}`, {
+      const body = {
         main_spec: form.main_spec || undefined,
         off_spec: form.off_spec || undefined,
         ilvl: form.ilvl ? parseInt(form.ilvl) : undefined,
         professions: form.professions || undefined,
         progression: form.progression || undefined,
         raiderio_url: form.raiderio_url || undefined,
-      });
+      };
+      if (officerMode) {
+        await api.patch(
+          `/api/characters/officer/${character.discord_id}/${encodeURIComponent(character.char_name)}`,
+          body,
+        );
+      } else {
+        await api.patch(`/api/characters/${encodeURIComponent(character.char_name)}`, body);
+      }
       onSuccess();
     } catch (err: any) {
       setError(err.response?.data?.detail ?? 'Update failed');
@@ -234,9 +254,31 @@ function EditCharacterForm({
 
 // ── Guild Roster tab ──────────────────────────────────────────────────────────
 
-function RosterTab({ characters, isLoading }: { characters: Character[]; isLoading: boolean }) {
+function RosterTab({
+  characters,
+  isLoading,
+  onEdit,
+  onDeleted,
+}: {
+  characters: Character[];
+  isLoading: boolean;
+  onEdit: (c: Character) => void;
+  onDeleted: () => void;
+}) {
   const [search, setSearch] = useState('');
   const [classFilter, setClassFilter] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [addDiscordId, setAddDiscordId] = useState('');
+
+  async function handleOfficerDelete(c: Character) {
+    if (!confirm(`Delete ${c.char_name}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`/api/characters/officer/${c.discord_id}/${encodeURIComponent(c.char_name)}`);
+      onDeleted();
+    } catch (err: any) {
+      alert(err.response?.data?.detail ?? 'Delete failed');
+    }
+  }
 
   const filtered = characters.filter((c) => {
     const matchSearch = !search || c.char_name.toLowerCase().includes(search.toLowerCase());
@@ -252,6 +294,38 @@ function RosterTab({ characters, isLoading }: { characters: Character[]; isLoadi
 
   return (
     <div className="space-y-5">
+      {/* Add character for member */}
+      <div>
+        <button
+          onClick={() => setShowAddForm(!showAddForm)}
+          className="btn-secondary flex items-center gap-2 text-sm"
+        >
+          <UserPlus size={14} /> Add Character for Member
+        </button>
+        {showAddForm && (
+          <div className="mt-3 glass rounded-xl p-4 space-y-3">
+            <p className="text-xs text-gray-400">Enter the member's Discord ID, then fill out their character details.</p>
+            <div>
+              <label className="text-xs text-gray-400 mb-1 block">Discord ID *</label>
+              <input
+                className="input"
+                placeholder="e.g. 123456789012345678"
+                value={addDiscordId}
+                onChange={(e) => setAddDiscordId(e.target.value)}
+              />
+            </div>
+            {addDiscordId && /^\d{17,20}$/.test(addDiscordId) && (
+              <CharacterForm
+                officerTargetDiscordId={parseInt(addDiscordId)}
+                onSuccess={() => { setShowAddForm(false); setAddDiscordId(''); onDeleted(); }}
+                onCancel={() => { setShowAddForm(false); setAddDiscordId(''); }}
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -289,7 +363,7 @@ function RosterTab({ characters, isLoading }: { characters: Character[]; isLoadi
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {grouped[cls].map((c) => (
-                    <div key={`${c.discord_id}-${c.char_name}`} className="glass rounded-xl p-3 flex items-center gap-3">
+                    <div key={`${c.discord_id}-${c.char_name}`} className="relative group glass rounded-xl p-3 flex items-center gap-3">
                       {c.avatar_url ? (
                         <img src={c.avatar_url} alt="" className="w-9 h-9 rounded-lg object-cover shrink-0" />
                       ) : (
@@ -306,6 +380,24 @@ function RosterTab({ characters, isLoading }: { characters: Character[]; isLoadi
                           {c.main_spec}{c.off_spec ? ` / ${c.off_spec}` : ''}{c.ilvl ? ` · ${c.ilvl}` : ''}
                         </p>
                         {c.progression && <p className="text-xs text-indigo-400 truncate">{c.progression}</p>}
+                        <p className="text-xs text-gray-600 truncate font-mono">{c.discord_id}</p>
+                      </div>
+                      {/* Officer action buttons on hover */}
+                      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => onEdit(c)}
+                          className="w-6 h-6 flex items-center justify-center rounded bg-white/10 hover:bg-indigo-600 transition-colors"
+                          title="Edit character"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                        <button
+                          onClick={() => handleOfficerDelete(c)}
+                          className="w-6 h-6 flex items-center justify-center rounded bg-white/10 hover:bg-red-600 transition-colors"
+                          title="Delete character"
+                        >
+                          <Trash2 size={11} />
+                        </button>
                       </div>
                     </div>
                   ))}
