@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Users, Calendar, TrendingUp, Shield, ExternalLink, PlusCircle, AlertCircle } from 'lucide-react';
+import { Users, Calendar, TrendingUp, Shield, ExternalLink, PlusCircle, AlertCircle, Swords } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { EventCard } from '@/components/Events/EventCard';
@@ -32,7 +32,7 @@ export function Dashboard() {
     enabled: isOfficer,
   });
 
-  const { data: myChars = [] } = useQuery<Character[]>({
+  const { data: myChars = [], isLoading: charsLoading } = useQuery<Character[]>({
     queryKey: ['characters'],
     queryFn: () => api.get('/api/characters').then((r) => r.data),
   });
@@ -46,6 +46,29 @@ export function Dashboard() {
         </h1>
         <p className="text-gray-400 text-sm mt-1">Here's what's happening in the guild</p>
       </div>
+
+      {/* ── No-character registration banner ──────────────────────────── */}
+      {!charsLoading && myChars.length === 0 && (
+        <Link
+          to="/characters"
+          className="flex items-center gap-4 p-5 rounded-2xl border-2 border-yellow-400/60 bg-yellow-400/10 hover:bg-yellow-400/20 transition-colors group"
+        >
+          <div className="shrink-0 w-12 h-12 rounded-xl bg-yellow-400/20 flex items-center justify-center">
+            <Swords size={24} className="text-yellow-300" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-yellow-200 font-extrabold text-base leading-tight">
+              You haven't registered a character yet!
+            </p>
+            <p className="text-yellow-300/70 text-sm mt-0.5">
+              Raid leaders need your character info to build rosters. Register now to get signed up for raids.
+            </p>
+          </div>
+          <div className="shrink-0 px-4 py-2 rounded-xl bg-yellow-400 text-black font-extrabold text-sm group-hover:bg-yellow-300 transition-colors whitespace-nowrap">
+            Register Character →
+          </div>
+        </Link>
+      )}
 
       {/* Admin stat cards (officers only) */}
       {isOfficer && adminStats && (
