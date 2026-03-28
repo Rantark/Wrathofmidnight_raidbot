@@ -251,6 +251,8 @@ async def init_db(db_path: str) -> None:
             "ALTER TABLE reminders ADD COLUMN msg_channel_id INTEGER",
             # Per-event accent color (integer Discord color) so simultaneous events are visually distinct
             "ALTER TABLE events ADD COLUMN color INTEGER",
+            # Display name for permission holders so admins don't just see raw IDs
+            "ALTER TABLE permissions ADD COLUMN username TEXT",
         ]
         # Idempotent CREATE for tables added after initial schema (can't use ALTER TABLE)
         new_tables = [

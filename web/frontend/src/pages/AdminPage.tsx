@@ -246,8 +246,10 @@ function PermissionsTab() {
               {items.map((p) => (
                 <div key={p.discord_id} className="flex items-center gap-3 p-3">
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-mono text-gray-300">{p.discord_id}</p>
-                    <p className="text-xs text-gray-500 capitalize">{p.role.replace('_', ' ')}</p>
+                    <p className="text-sm font-semibold text-gray-100">
+                      {p.username || <span className="italic text-gray-400">Unknown</span>}
+                    </p>
+                    <p className="text-xs text-gray-500 font-mono">{p.discord_id}</p>
                   </div>
                   <button
                     onClick={() => revoke(p.discord_id)}

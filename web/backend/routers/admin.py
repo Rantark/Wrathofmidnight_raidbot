@@ -130,7 +130,7 @@ async def list_permissions(user: dict = Depends(require_officer)):
     guild_id = int(user["guild_id"])
     async with get_db() as db:
         cur = await db.execute(
-            "SELECT discord_id, role FROM permissions WHERE guild_id=? ORDER BY role ASC, discord_id ASC",
+            "SELECT discord_id, username, role FROM permissions WHERE guild_id=? ORDER BY role ASC, discord_id ASC",
             (guild_id,),
         )
         rows = await cur.fetchall()
@@ -147,10 +147,10 @@ async def grant_permission(body: PermissionGrant, user: dict = Depends(require_o
 
     async with get_db() as db:
         await db.execute(
-            """INSERT INTO permissions (guild_id, discord_id, role)
-               VALUES (?,?,?)
-               ON CONFLICT(guild_id, discord_id) DO UPDATE SET role=excluded.role""",
-            (guild_id, discord_id, body.role),
+            """INSERT INTO permissions (guild_id, discord_id, role, username)
+               VALUES (?,?,?,?)
+               ON CONFLICT(guild_id, discord_id) DO UPDATE SET role=excluded.role, username=excluded.username""",
+            (guild_id, discord_id, body.role, body.username or None),
         )
         await db.commit()
     return {"message": f"Granted {body.role} to {body.discord_id}"}
