@@ -289,6 +289,8 @@ function RosterTab({
   const [showAddForm, setShowAddForm] = useState(false);
   const [addDiscordId, setAddDiscordId] = useState('');
   const [syncing, setSyncing] = useState<string | null>(null); // key = `${discord_id}-${char_name}`
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncAllResult, setSyncAllResult] = useState<{ synced: string[]; skipped: { char_name: string; reason: string }[] } | null>(null);
 
   async function handleOfficerDelete(c: Character) {
     if (!confirm(`Delete ${c.char_name}? This cannot be undone.`)) return;
@@ -319,6 +321,20 @@ function RosterTab({
     }
   }
 
+  async function handleSyncAll() {
+    setSyncingAll(true);
+    setSyncAllResult(null);
+    try {
+      const res = await api.post('/api/characters/sync-rio-all');
+      setSyncAllResult({ synced: res.data.synced ?? [], skipped: res.data.skipped ?? [] });
+      onDeleted(); // refresh roster
+    } catch (err: any) {
+      alert(err.response?.data?.detail ?? 'Sync All failed');
+    } finally {
+      setSyncingAll(false);
+    }
+  }
+
   const filtered = characters.filter((c) => {
     const matchSearch = !search || c.char_name.toLowerCase().includes(search.toLowerCase());
     const matchClass  = !classFilter || c.char_class === classFilter;
@@ -333,14 +349,45 @@ function RosterTab({
 
   return (
     <div className="space-y-5">
-      {/* Add character for member */}
-      <div>
+      {/* Toolbar: Add + Sync All */}
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setShowAddForm(!showAddForm)}
           className="btn-secondary flex items-center gap-2 text-sm"
         >
           <UserPlus size={14} /> Add Character for Member
         </button>
+        <button
+          onClick={handleSyncAll}
+          disabled={syncingAll}
+          className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-50"
+        >
+          <RefreshCw size={14} className={syncingAll ? 'animate-spin' : ''} />
+          {syncingAll ? 'Syncing…' : 'Sync All with Raider.IO'}
+        </button>
+      </div>
+
+      {/* Sync All results */}
+      {syncAllResult && (
+        <div className="glass rounded-xl p-4 text-sm space-y-2">
+          <p className="font-semibold text-green-400">
+            Sync complete — {syncAllResult.synced.length} synced, {syncAllResult.skipped.length} skipped
+          </p>
+          {syncAllResult.skipped.length > 0 && (
+            <details className="text-xs text-gray-400">
+              <summary className="cursor-pointer hover:text-white">Show skipped ({syncAllResult.skipped.length})</summary>
+              <ul className="mt-2 space-y-1 pl-3">
+                {syncAllResult.skipped.map((s) => (
+                  <li key={s.char_name}><span className="text-gray-200">{s.char_name}</span> — {s.reason}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+
+      {/* Add character for member (form) */}
+      <div>
         {showAddForm && (
           <div className="mt-3 glass rounded-xl p-4 space-y-3">
             <p className="text-xs text-gray-400">Enter the member's Discord ID, then fill out their character details.</p>

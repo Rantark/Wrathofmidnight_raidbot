@@ -114,6 +114,73 @@ async def sync_character_raiderio(
     }
 
 
+@router.post("/sync-rio-all")
+async def sync_all_characters_raiderio(user: dict = Depends(require_officer)):
+    """Re-fetch ilvl, spec, and avatar from Raider.IO for every syncable character in the guild."""
+    guild_id = int(user["guild_id"])
+
+    async with get_db() as db:
+        cur = await db.execute(
+            "SELECT discord_id, char_name, char_class, realm, region, raiderio_url FROM characters "
+            "WHERE guild_id=? AND (realm IS NOT NULL OR raiderio_url IS NOT NULL)",
+            (guild_id,),
+        )
+        rows = await cur.fetchall()
+
+    synced: list[str] = []
+    skipped: list[dict] = []
+
+    for row in rows:
+        region    = row["region"] or "us"
+        realm     = row["realm"]
+        name      = row["char_name"]
+        rio_url   = row["raiderio_url"] or ""
+
+        url_match = re.search(
+            r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
+            rio_url.lower(),
+        )
+        if url_match:
+            region, realm, name = url_match.groups()
+
+        if not realm:
+            skipped.append({"char_name": row["char_name"], "reason": "no realm"})
+            continue
+
+        data = await _rio_lookup(region, realm, name)
+        if data is None:
+            skipped.append({"char_name": row["char_name"], "reason": f"not found on Raider.IO ({region}/{realm}/{name.lower()})"})
+            continue
+
+        updates: dict = {}
+        new_ilvl  = (data.get("gear") or {}).get("item_level_equipped")
+        new_spec  = data.get("active_spec_name")
+        new_thumb = data.get("thumbnail_url")
+        if new_ilvl:
+            updates["ilvl"] = new_ilvl
+        if new_spec:
+            updates["main_spec"] = new_spec
+        if new_thumb:
+            updates["avatar_url"] = new_thumb
+
+        if updates:
+            async with get_db() as db:
+                set_clause = ", ".join(f"{k}=?" for k in updates)
+                await db.execute(
+                    f"UPDATE characters SET {set_clause} WHERE discord_id=? AND guild_id=? AND char_name=?",
+                    list(updates.values()) + [row["discord_id"], guild_id, row["char_name"]],
+                )
+                await db.commit()
+
+        synced.append(row["char_name"])
+
+    return {
+        "message": f"Sync complete: {len(synced)} synced, {len(skipped)} skipped",
+        "synced": synced,
+        "skipped": skipped,
+    }
+
+
 @router.get("/log")
 async def character_registration_log(user: dict = Depends(require_raid_leader)):
     """Return the last 200 character registration/deletion events (officers only)."""

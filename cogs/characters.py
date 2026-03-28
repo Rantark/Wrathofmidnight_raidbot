@@ -14,7 +14,6 @@ from typing import Optional
 import config
 from database import queries
 from utils import embeds
-from utils import blizzard as bnet
 from utils import raiderio as rio
 from utils.constants import VALID_SPECS, ALL_SPECS, CLASS_COLORS
 from utils.validators import validate_class, validate_spec, validate_ilvl, validate_char_name
@@ -168,7 +167,7 @@ class Characters(commands.Cog):
     # ── /character ────────────────────────────────────────────────────────────
     char_group = app_commands.Group(name="character", description="Manage your WoW characters")
 
-    @char_group.command(name="add", description="Register a new WoW character (auto-fills from Armory if realm provided)")
+    @char_group.command(name="add", description="Register a new WoW character (auto-fills from Raider.IO if realm provided)")
     @app_commands.describe(
         name="Character name",
         realm="Your realm name only, no region suffix (e.g. Anvilmar)",
@@ -176,7 +175,7 @@ class Characters(commands.Cog):
         char_class="WoW class — required if no realm, optional override with realm",
         main_spec="Main spec — required if no realm, optional override with realm",
         off_spec="Off spec (optional)",
-        ilvl="Item level — auto-filled from Armory if realm provided",
+        ilvl="Item level — auto-filled from Raider.IO if realm provided",
         professions="Your professions, comma-separated (e.g. Alchemy, Herbalism)",
         progression="Current raid progression (e.g. 8/8 M, 4/8 H Nerub-ar Palace)",
     )
@@ -206,29 +205,28 @@ class Characters(commands.Cog):
             return
 
         region = region.lower().strip()
-        if region not in bnet.BlizzardClient.REGIONS:
+        _VALID_REGIONS = ("us", "eu", "kr", "tw")
+        if region not in _VALID_REGIONS:
             await interaction.followup.send(
                 embed=embeds.error_embed(
                     "Invalid Region",
-                    f"Region must be one of: {', '.join(bnet.BlizzardClient.REGIONS)}",
+                    f"Region must be one of: {', '.join(_VALID_REGIONS)}",
                 ),
                 ephemeral=True,
             )
             return
 
-        # ── API lookup: Raider.IO first, Blizzard as fallback ─────────────────
+        # ── API lookup: Raider.IO only ────────────────────────────────────────
         api_race:       Optional[str] = None
-        api_faction:    Optional[str] = None
         api_avatar_url: Optional[str] = None
         data_source:    Optional[str] = None
 
         if realm:
             await interaction.followup.send(
-                embed=embeds.info_embed("🔍 Looking up character…", f"Checking Raider.IO and Blizzard Armory for **{name}**–{realm}…"),
+                embed=embeds.info_embed("🔍 Looking up character…", f"Checking Raider.IO for **{name}**–{realm}…"),
                 ephemeral=True,
             )
 
-            # 1. Try Raider.IO (no credentials required)
             rio_data = await rio.client.get_character(region, realm, name)
             if rio_data is not None:
                 data_source = "Raider.IO"
@@ -240,33 +238,13 @@ class Characters(commands.Cog):
                     ilvl = (rio_data.get("gear") or {}).get("item_level_equipped") or None
                 api_race       = rio_data.get("race")
                 api_avatar_url = rio_data.get("thumbnail_url")
-
             else:
-                # 2. Fall back to Blizzard API
-                bnet_client = bnet.get_client()
-                if bnet_client:
-                    bnet_data = await bnet_client.get_character(region, realm, name)
-                    if bnet_data is not None:
-                        data_source = "Blizzard Armory"
-                        if not char_class:
-                            char_class = bnet_data.get("character_class", {}).get("name")
-                        if not main_spec:
-                            main_spec = bnet_data.get("active_spec", {}).get("name")
-                        if ilvl is None:
-                            ilvl = bnet_data.get("average_item_level") or None
-                        api_race    = bnet_data.get("race",    {}).get("name")
-                        api_faction = bnet_data.get("faction", {}).get("name")
-                        media = await bnet_client.get_character_media(region, realm, name)
-                        if media:
-                            api_avatar_url = bnet_client.extract_avatar_url(media)
-
-            if data_source is None:
                 realm_slug = realm.lower().replace("'", "").replace(" ", "-")
                 await interaction.followup.send(
                     embed=embeds.error_embed(
                         "Character Not Found",
-                        f"Neither Raider.IO nor the Blizzard Armory could find **{name}** on **{realm}**.\n\n"
-                        "Make sure you have logged into WoW recently and your profile is public on Raider.IO: "
+                        f"Raider.IO could not find **{name}** on **{realm}**.\n\n"
+                        "Make sure your profile is public on Raider.IO: "
                         f"raider.io/characters/{region}/{realm_slug}/{name.lower()}\n\n"
                         "You can also register manually by omitting the `realm` field.",
                     ),
@@ -387,9 +365,7 @@ class Characters(commands.Cog):
         if ilvl:
             embed.add_field(name="Item Level", value=str(ilvl), inline=True)
         if api_race:
-            embed.add_field(name="Race",    value=api_race,    inline=True)
-        if api_faction:
-            embed.add_field(name="Faction", value=api_faction, inline=True)
+            embed.add_field(name="Race", value=api_race, inline=True)
         if realm:
             embed.add_field(name="Realm",   value=f"{realm.title()} ({region.upper()})", inline=True)
         if professions:
@@ -436,52 +412,34 @@ class Characters(commands.Cog):
         region, realm, name = parsed
 
         await interaction.followup.send(
-            embed=embeds.info_embed("🔍 Looking up character…", f"Checking Raider.IO and Blizzard Armory for **{name.capitalize()}**–{realm}…"),
+            embed=embeds.info_embed("🔍 Looking up character…", f"Checking Raider.IO for **{name.capitalize()}**–{realm}…"),
             ephemeral=True,
         )
 
-        # ── API lookup: Raider.IO first, Blizzard as fallback ─────────────────
+        # ── API lookup: Raider.IO only ────────────────────────────────────────
         char_class:     Optional[str] = None
         main_spec:      Optional[str] = None
         api_race:       Optional[str] = None
-        api_faction:    Optional[str] = None
         api_avatar_url: Optional[str] = None
         api_ilvl:       Optional[int] = None
-        data_source:    Optional[str] = None
 
         rio_data = await rio.client.get_character(region, realm, name)
-        if rio_data is not None:
-            data_source    = "Raider.IO"
-            char_class     = rio_data.get("class")
-            main_spec      = rio_data.get("active_spec_name")
-            api_ilvl       = (rio_data.get("gear") or {}).get("item_level_equipped") or None
-            api_race       = rio_data.get("race")
-            api_avatar_url = rio_data.get("thumbnail_url")
-        else:
-            bnet_client = bnet.get_client()
-            if bnet_client:
-                bnet_data = await bnet_client.get_character(region, realm, name)
-                if bnet_data is not None:
-                    data_source  = "Blizzard Armory"
-                    char_class   = bnet_data.get("character_class", {}).get("name")
-                    main_spec    = bnet_data.get("active_spec", {}).get("name")
-                    api_ilvl     = bnet_data.get("average_item_level") or None
-                    api_race     = bnet_data.get("race",    {}).get("name")
-                    api_faction  = bnet_data.get("faction", {}).get("name")
-                    media = await bnet_client.get_character_media(region, realm, name)
-                    if media:
-                        api_avatar_url = bnet_client.extract_avatar_url(media)
-
-        if data_source is None:
+        if rio_data is None:
             await interaction.followup.send(
                 embed=embeds.error_embed(
                     "Character Not Found",
-                    f"Neither Raider.IO nor the Blizzard Armory could find **{name.capitalize()}** on **{realm}**.\n\n"
-                    "Make sure you have logged into WoW recently and your profile is public on Raider.IO.",
+                    f"Raider.IO could not find **{name.capitalize()}** on **{realm}**.\n\n"
+                    "Make sure your profile is public on Raider.IO.",
                 ),
                 ephemeral=True,
             )
             return
+
+        char_class     = rio_data.get("class")
+        main_spec      = rio_data.get("active_spec_name")
+        api_ilvl       = (rio_data.get("gear") or {}).get("item_level_equipped") or None
+        api_race       = rio_data.get("race")
+        api_avatar_url = rio_data.get("thumbnail_url")
 
         # ── Validate class / spec ─────────────────────────────────────────────
         validated_class = validate_class(char_class) if char_class else None
@@ -563,9 +521,7 @@ class Characters(commands.Cog):
         if api_ilvl:
             embed.add_field(name="Item Level",  value=str(api_ilvl),  inline=True)
         if api_race:
-            embed.add_field(name="Race",        value=api_race,       inline=True)
-        if api_faction:
-            embed.add_field(name="Faction",     value=api_faction,    inline=True)
+            embed.add_field(name="Race",  value=api_race, inline=True)
         embed.add_field(name="Realm", value=f"{realm.replace('-', ' ').title()} ({region.upper()})", inline=True)
         if professions:
             embed.add_field(name="Professions", value=professions, inline=True)
@@ -573,7 +529,7 @@ class Characters(commands.Cog):
             embed.add_field(name="Progression", value=progression, inline=True)
         if api_avatar_url:
             embed.set_thumbnail(url=api_avatar_url)
-        embed.set_footer(text=f"✅ Found via {data_source}")
+        embed.set_footer(text="✅ Found via Raider.IO")
         embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
         await interaction.followup.send(embed=embed, ephemeral=False)
         await self._refresh_roster_embed(interaction.guild_id)
@@ -728,7 +684,7 @@ class Characters(commands.Cog):
         )
         await self._refresh_roster_embed(interaction.guild_id)
 
-    @char_group.command(name="sync", description="Re-sync a character's class/spec/ilvl from Raider.IO or the Blizzard Armory")
+    @char_group.command(name="sync", description="Re-sync a character's class/spec/ilvl from Raider.IO")
     @app_commands.describe(name="Character name to sync")
     async def character_sync(self, interaction: discord.Interaction, name: str) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -743,71 +699,57 @@ class Characters(commands.Cog):
             )
             return
 
-        realm  = char.get("realm")
-        region = char.get("region") or "us"
-        if not realm:
+        # Resolve lookup coords: prefer raiderio_url, fall back to realm+region
+        import re as _re
+        lookup_region = char.get("region") or "us"
+        lookup_realm  = char.get("realm")
+        lookup_name   = char["char_name"]
+
+        rio_url = char.get("raiderio_url") or ""
+        url_match = _re.search(
+            r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
+            rio_url.lower(),
+        )
+        if url_match:
+            lookup_region, lookup_realm, lookup_name = url_match.groups()
+
+        if not lookup_realm:
             await interaction.followup.send(
                 embed=embeds.error_embed(
                     "No Realm Stored",
                     f"**{char['char_name']}** has no realm on record.\n"
-                    "Remove and re-add with the `realm` field to enable sync.",
+                    "Remove and re-add with the `realm` field (or a Raider.IO URL) to enable sync.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        rio_data = await rio.client.get_character(lookup_region, lookup_realm, lookup_name)
+        if rio_data is None:
+            await interaction.followup.send(
+                embed=embeds.error_embed(
+                    "Not Found on Raider.IO",
+                    f"**{char['char_name']}** could not be found on Raider.IO "
+                    f"({lookup_region}/{lookup_realm}).\n\n"
+                    "Make sure your profile is public on Raider.IO.",
                 ),
                 ephemeral=True,
             )
             return
 
         updates: dict = {}
-        sync_source: Optional[str] = None
-        new_ilvl:    Optional[int] = None
-        new_race:    Optional[str] = None
-        new_faction: Optional[str] = None
-
-        # 1. Try Raider.IO first
-        rio_data = await rio.client.get_character(region, realm, char["char_name"])
-        if rio_data is not None:
-            sync_source = "Raider.IO"
-            new_ilvl = (rio_data.get("gear") or {}).get("item_level_equipped")
-            new_race = rio_data.get("race")
-            avatar   = rio_data.get("thumbnail_url")
-            if new_ilvl:
-                updates["ilvl"] = new_ilvl
-            if new_race:
-                updates["race"] = new_race
-            if avatar:
-                updates["avatar_url"] = avatar
-
-        else:
-            # 2. Fall back to Blizzard API
-            bnet_client = bnet.get_client()
-            if bnet_client:
-                bnet_data = await bnet_client.get_character(region, realm, char["char_name"])
-                if bnet_data is not None:
-                    sync_source = "Blizzard Armory"
-                    new_ilvl    = bnet_data.get("average_item_level")
-                    new_race    = bnet_data.get("race",    {}).get("name")
-                    new_faction = bnet_data.get("faction", {}).get("name")
-                    if new_ilvl:
-                        updates["ilvl"] = new_ilvl
-                    if new_race:
-                        updates["race"] = new_race
-                    if new_faction:
-                        updates["faction"] = new_faction
-                    media = await bnet_client.get_character_media(region, realm, char["char_name"])
-                    if media:
-                        avatar = bnet_client.extract_avatar_url(media)
-                        if avatar:
-                            updates["avatar_url"] = avatar
-
-        if sync_source is None:
-            await interaction.followup.send(
-                embed=embeds.error_embed(
-                    "Not Found",
-                    f"**{char['char_name']}** on **{realm}-{region.upper()}** could not be found "
-                    "on Raider.IO or the Blizzard Armory.",
-                ),
-                ephemeral=True,
-            )
-            return
+        new_ilvl = (rio_data.get("gear") or {}).get("item_level_equipped")
+        new_race = rio_data.get("race")
+        new_spec = rio_data.get("active_spec_name")
+        avatar   = rio_data.get("thumbnail_url")
+        if new_ilvl:
+            updates["ilvl"] = new_ilvl
+        if new_race:
+            updates["race"] = new_race
+        if new_spec:
+            updates["main_spec"] = new_spec
+        if avatar:
+            updates["avatar_url"] = avatar
 
         if updates:
             await queries.update_character(
@@ -821,13 +763,13 @@ class Characters(commands.Cog):
         )
         if new_ilvl:
             embed.add_field(name="Item Level", value=str(new_ilvl), inline=True)
+        if new_spec:
+            embed.add_field(name="Spec",       value=new_spec,      inline=True)
         if new_race:
             embed.add_field(name="Race",       value=new_race,      inline=True)
-        if new_faction:
-            embed.add_field(name="Faction",    value=new_faction,   inline=True)
         if updates.get("avatar_url"):
             embed.set_thumbnail(url=updates["avatar_url"])
-        embed.set_footer(text=f"✅ Found via {sync_source} — {realm.title()}-{region.upper()}")
+        embed.set_footer(text=f"✅ Synced via Raider.IO — {lookup_realm.title()}-{lookup_region.upper()}")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @char_group.command(name="remove", description="Remove a registered character")
