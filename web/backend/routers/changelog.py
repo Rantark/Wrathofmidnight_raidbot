@@ -2,16 +2,19 @@ import json
 import pathlib
 from fastapi import APIRouter, HTTPException
 
-router = APIRouter(prefix="/api/changelog", tags=["changelog"])
+router = APIRouter(prefix="/changelog", tags=["changelog"])
 
-_CHANGELOG_PATH = pathlib.Path(__file__).parent.parent.parent.parent / "changelog.json"
+# Resolve to an absolute path so it works regardless of working directory
+_CHANGELOG_PATH = (
+    pathlib.Path(__file__).resolve().parent.parent.parent.parent / "changelog.json"
+)
 
 
 def _load() -> dict:
     try:
         return json.loads(_CHANGELOG_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise HTTPException(500, "changelog.json not found")
+        raise HTTPException(500, f"changelog.json not found (looked in {_CHANGELOG_PATH})")
     except json.JSONDecodeError as exc:
         raise HTTPException(500, f"changelog.json is malformed: {exc}")
 

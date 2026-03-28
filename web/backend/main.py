@@ -22,7 +22,7 @@ app.include_router(events.router, prefix="/api")
 app.include_router(attendance.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 app.include_router(templates.router, prefix="/api")
-app.include_router(changelog.router)
+app.include_router(changelog.router, prefix="/api")
 
 
 @app.get("/")
