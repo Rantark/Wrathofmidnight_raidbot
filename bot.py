@@ -94,6 +94,7 @@ COGS = [
     "cogs.events",
     "cogs.attendance",
     "cogs.admin",
+    "cogs.changelog",
 ]
 
 

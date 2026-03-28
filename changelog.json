@@ -1,0 +1,56 @@
+{
+  "current": "1.6.0",
+  "entries": [
+    {
+      "version": "1.6.0",
+      "date": "2026-03-28",
+      "title": "Raider.IO Overhaul, Bulk Sync & Changelog",
+      "changes": [
+        { "type": "removed",  "text": "Removed Blizzard/WoW API entirely — Raider.IO is now the sole sync source" },
+        { "type": "new",      "text": "Raider.IO URL field on character registration — auto-fills class, spec, item level, realm, and portrait" },
+        { "type": "new",      "text": "Sync All button on Guild Roster — re-syncs every character from Raider.IO at once, skipping errors" },
+        { "type": "new",      "text": "Per-character Sync button on Guild Roster for quick individual re-syncs" },
+        { "type": "new",      "text": "Character portrait (thumbnail) pulled from Raider.IO and stored on registration and sync" },
+        { "type": "fix",      "text": "Characters with alt-code / unicode names (e.g. Ñight, Ðëáth) now sync correctly" },
+        { "type": "new",      "text": "Registration channel management — bot auto-posts a pinned 'Start Here' embed and deletes non-bot messages" },
+        { "type": "new",      "text": "Admin Registration Log page showing every character register/delete event with source and timestamp" },
+        { "type": "improved", "text": "Guild Roster now accessible to both Officers and Raid Leaders" },
+        { "type": "improved", "text": "Roster errors now display the actual failure reason instead of silently showing nothing" },
+        { "type": "new",      "text": "Dashboard banner prompting users with no characters to register" },
+        { "type": "new",      "text": "Changelog system — this page and the /changelog Discord command" }
+      ]
+    },
+    {
+      "version": "1.5.1",
+      "date": "2026-03-01",
+      "title": "Stability & Roster Fixes",
+      "changes": [
+        { "type": "fix",      "text": "Fixed slash commands not syncing to new guilds on bot join" },
+        { "type": "fix",      "text": "Fixed auto-archive loop crashing when a channel had been deleted" },
+        { "type": "improved", "text": "Reminder loop now cleans up previously-posted reminder messages before sending a new one" }
+      ]
+    },
+    {
+      "version": "1.5.0",
+      "date": "2026-02-15",
+      "title": "Attendance Tracking",
+      "changes": [
+        { "type": "new",      "text": "Attendance page showing per-member raid participation percentages" },
+        { "type": "new",      "text": "Officer attendance export" },
+        { "type": "improved", "text": "Event embeds now show attendance count in real time" }
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-01-01",
+      "title": "Initial Release",
+      "changes": [
+        { "type": "new", "text": "Discord bot with slash commands for character management, raid events, and signups" },
+        { "type": "new", "text": "Web portal with Discord OAuth login" },
+        { "type": "new", "text": "Raid event creation, signup embeds, and automatic reminders" },
+        { "type": "new", "text": "Guild roster view for officers" },
+        { "type": "new", "text": "Role-based access: member, raid_leader, officer" }
+      ]
+    }
+  ]
+}

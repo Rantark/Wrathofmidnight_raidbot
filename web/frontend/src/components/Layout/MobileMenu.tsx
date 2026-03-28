@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Calendar, Users, BarChart2, UserCog, LogOut, X, Sword,
+  LayoutDashboard, Calendar, Users, BarChart2, UserCog, LogOut, X, Sword, Tag,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/events',    icon: Calendar,         label: 'Raid Events' },
   { to: '/roster',    icon: Users,            label: 'Guild Roster' },
   { to: '/attendance',icon: BarChart2,        label: 'Attendance' },
+  { to: '/changelog', icon: Tag,              label: 'Changelog' },
 ];
 
 export function MobileMenu({ isOpen, onClose }: Props) {

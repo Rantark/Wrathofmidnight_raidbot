@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, Calendar, Users, BarChart2, UserCog, LogOut, Sword,
+  LayoutDashboard, Calendar, Users, BarChart2, UserCog, LogOut, Sword, Tag,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -9,6 +9,7 @@ const navItems = [
   { to: '/events',    icon: Calendar,         label: 'Raid Events' },
   { to: '/roster',    icon: Users,            label: 'Guild Roster' },
   { to: '/attendance',icon: BarChart2,        label: 'Attendance' },
+  { to: '/changelog', icon: Tag,              label: 'Changelog' },
 ];
 
 const adminItems = [
@@ -28,7 +29,7 @@ export function Sidebar() {
           </div>
           <div className="min-w-0">
             <p className="font-bold text-sm leading-tight truncate">Wrath of Midnight</p>
-            <p className="text-gray-400 text-xs">Raid Portal</p>
+            <p className="text-gray-400 text-xs">Raid Portal <span className="font-mono">v1.6.0</span></p>
           </div>
         </div>
       </div>

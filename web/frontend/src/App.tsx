@@ -14,6 +14,7 @@ import { CharactersPage } from '@/pages/CharactersPage';
 import { RosterView } from '@/pages/RosterView';
 import { AttendancePage } from '@/pages/AttendancePage';
 import { AdminPage } from '@/pages/AdminPage';
+import { ChangelogPage } from '@/pages/ChangelogPage';
 
 export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -54,7 +55,10 @@ export default function App() {
           <Route path="/admin" element={
             <ProtectedRoute require="officer"><AdminPage /></ProtectedRoute>
           } />
-	<Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/changelog" element={
+            <ProtectedRoute><ChangelogPage /></ProtectedRoute>
+          } />
+          <Route path="/auth/callback" element={<AuthCallback />} />
 
           <Route path="*" element={
             isAuthenticated ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />
