@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { classColor } from '@/lib/utils';
-import { ExternalLink, AlertTriangle, Loader2, Trash2, UserPlus, Settings, Users, BarChart3, ClipboardList } from 'lucide-react';
+import { ExternalLink, AlertTriangle, Loader2, Trash2, UserPlus, Settings, Users, BarChart3, ClipboardList, UserX } from 'lucide-react';
 import type { Character, Permission, GuildConfig } from '@/types';
 
-type Tab = 'overview' | 'permissions' | 'config' | 'reglog';
+type Tab = 'overview' | 'permissions' | 'config' | 'reglog' | 'audit';
 
 export function AdminPage() {
   const [tab, setTab] = useState<Tab>('overview');
@@ -20,6 +20,7 @@ export function AdminPage() {
           { id: 'permissions' as Tab,  label: 'Permissions',   icon: Users },
           { id: 'config' as Tab,       label: 'Config',        icon: Settings },
           { id: 'reglog' as Tab,       label: 'Reg Log',       icon: ClipboardList },
+          { id: 'audit' as Tab,        label: 'Audit',         icon: UserX },
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -37,6 +38,7 @@ export function AdminPage() {
       {tab === 'permissions' && <PermissionsTab />}
       {tab === 'config'      && <ConfigTab />}
       {tab === 'reglog'      && <RegistrationLogTab />}
+      {tab === 'audit'       && <AuditTab />}
     </div>
   );
 }
@@ -477,6 +479,95 @@ function RegistrationLogTab() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Audit ─────────────────────────────────────────────────────────────────────
+
+interface AuditMember {
+  discord_id: string;
+  username: string | null;
+  display_name: string | null;
+}
+
+function AuditTab() {
+  const { data, isLoading, error, refetch } = useQuery<{
+    total_members: number;
+    unregistered_count: number;
+    unregistered: AuditMember[];
+  }>({
+    queryKey: ['admin-audit'],
+    queryFn: () => api.get('/api/admin/audit').then((r) => r.data),
+  });
+
+  if (isLoading) return <div className="text-gray-400 text-sm py-8 text-center">Loading audit…</div>;
+  if (error) return <div className="text-red-400 text-sm py-8 text-center">Failed to load audit data.</div>;
+  if (!data) return null;
+
+  const pct = data.total_members > 0
+    ? Math.round(((data.total_members - data.unregistered_count) / data.total_members) * 100)
+    : 0;
+
+  return (
+    <div className="space-y-5">
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard label="Total Members"   value={data.total_members} />
+        <StatCard label="Unregistered"    value={data.unregistered_count} />
+        <StatCard label="Registered %" value={pct} />
+      </div>
+
+      <div className="flex items-center justify-between">
+        <h2 className="font-bold text-base flex items-center gap-2 text-orange-400">
+          <UserX size={16} />
+          Members without Characters ({data.unregistered_count})
+        </h2>
+        <button onClick={() => refetch()} className="btn-secondary text-xs py-1.5 flex items-center gap-1">
+          Refresh
+        </button>
+      </div>
+
+      {data.unregistered_count === 0 ? (
+        <div className="glass rounded-xl p-8 text-center text-green-400 font-semibold">
+          All members have at least one character registered!
+        </div>
+      ) : (
+        <div className="glass rounded-xl divide-y divide-gray-700/50">
+          {data.unregistered.map((m) => {
+            const name = m.display_name || m.username;
+            return (
+              <div key={m.discord_id} className="flex items-center gap-3 p-3">
+                <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center shrink-0">
+                  <UserX size={14} className="text-gray-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  {name ? (
+                    <>
+                      <p className="text-sm font-semibold text-gray-100">{name}</p>
+                      {m.username && m.display_name && m.username !== m.display_name && (
+                        <p className="text-xs text-gray-500">{m.username}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm italic text-gray-400">Unknown user</p>
+                  )}
+                  <p className="text-xs text-gray-600 font-mono">{m.discord_id}</p>
+                </div>
+                <span className="text-xs text-orange-400 bg-orange-900/30 px-2 py-0.5 rounded-md border border-orange-800/40 shrink-0">
+                  No characters
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <p className="text-xs text-gray-600">
+        Note: This list is populated from the Discord member cache kept by the bot.
+        Data is updated when members join, leave, or update their profile.
+        If this is your first time running the bot with this version, restart the bot to do an initial sync.
+      </p>
     </div>
   );
 }

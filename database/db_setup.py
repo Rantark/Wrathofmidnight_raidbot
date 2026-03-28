@@ -278,6 +278,15 @@ async def init_db(db_path: str) -> None:
                 created_at TEXT    NOT NULL DEFAULT (datetime('now','utc'))
             )""",
             "CREATE INDEX IF NOT EXISTS idx_char_reg_log ON char_registration_log(guild_id, created_at DESC)",
+            """CREATE TABLE IF NOT EXISTS guild_members (
+                guild_id     INTEGER NOT NULL,
+                discord_id   INTEGER NOT NULL,
+                username     TEXT,
+                display_name TEXT,
+                is_bot       INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (guild_id, discord_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_guild_members_guild ON guild_members(guild_id)",
         ]
         for sql in new_tables:
             try:

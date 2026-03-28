@@ -921,3 +921,51 @@ async def mark_web_action_processed(db_path: str, action_id: int) -> None:
         "UPDATE web_actions SET processed=1 WHERE action_id=?",
         (action_id,),
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Guild Members (Discord member cache for web audit)
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def upsert_guild_member(
+    db_path: str,
+    guild_id: int,
+    discord_id: int,
+    username: Optional[str],
+    display_name: Optional[str],
+    is_bot: bool = False,
+) -> None:
+    await _execute(
+        db_path,
+        """INSERT INTO guild_members (guild_id, discord_id, username, display_name, is_bot)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(guild_id, discord_id) DO UPDATE SET
+               username=excluded.username,
+               display_name=excluded.display_name,
+               is_bot=excluded.is_bot""",
+        (guild_id, discord_id, username, display_name, 1 if is_bot else 0),
+    )
+
+
+async def remove_guild_member(db_path: str, guild_id: int, discord_id: int) -> None:
+    await _execute(
+        db_path,
+        "DELETE FROM guild_members WHERE guild_id=? AND discord_id=?",
+        (guild_id, discord_id),
+    )
+
+
+async def get_unregistered_members(db_path: str, guild_id: int) -> list[dict]:
+    """Return non-bot guild members who have no characters registered."""
+    return await _fetchall(
+        db_path,
+        """SELECT gm.discord_id, gm.username, gm.display_name
+           FROM guild_members gm
+           WHERE gm.guild_id=? AND gm.is_bot=0
+             AND NOT EXISTS (
+               SELECT 1 FROM characters c
+               WHERE c.guild_id=gm.guild_id AND c.discord_id=gm.discord_id
+             )
+           ORDER BY gm.display_name, gm.username""",
+        (guild_id,),
+    )

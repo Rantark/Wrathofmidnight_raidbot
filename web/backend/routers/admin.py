@@ -176,3 +176,39 @@ async def revoke_permission(discord_id: str, user: dict = Depends(require_office
             (guild_id, did),
         )
         await db.commit()
+
+
+# ── Member audit ──────────────────────────────────────────────────────────────
+
+@router.get("/audit")
+async def member_audit(user: dict = Depends(require_officer)):
+    """Return guild members who have no characters registered."""
+    guild_id = int(user["guild_id"])
+    async with get_db() as db:
+        # Members with no characters
+        cur = await db.execute(
+            """SELECT gm.discord_id, gm.username, gm.display_name
+               FROM guild_members gm
+               WHERE gm.guild_id=? AND gm.is_bot=0
+                 AND NOT EXISTS (
+                   SELECT 1 FROM characters c
+                   WHERE c.guild_id=gm.guild_id AND c.discord_id=gm.discord_id
+                 )
+               ORDER BY gm.display_name, gm.username""",
+            (guild_id,),
+        )
+        unregistered = [dict(r) for r in await cur.fetchall()]
+
+        # Total non-bot member count for context
+        total_cur = await db.execute(
+            "SELECT COUNT(*) as cnt FROM guild_members WHERE guild_id=? AND is_bot=0",
+            (guild_id,),
+        )
+        total_row = await total_cur.fetchone()
+        total_members = total_row["cnt"] if total_row else 0
+
+    return {
+        "total_members": total_members,
+        "unregistered_count": len(unregistered),
+        "unregistered": unregistered,
+    }

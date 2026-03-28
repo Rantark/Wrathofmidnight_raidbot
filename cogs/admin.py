@@ -42,6 +42,51 @@ class Admin(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
+    async def cog_load(self) -> None:
+        """Sync all guild members to the DB on startup so the web audit has up-to-date data."""
+        await self.bot.wait_until_ready()
+        for guild in self.bot.guilds:
+            try:
+                async for member in guild.fetch_members(limit=None):
+                    await queries.upsert_guild_member(
+                        config.DATABASE_PATH,
+                        guild.id,
+                        member.id,
+                        str(member) if hasattr(member, "discriminator") and member.discriminator != "0" else member.name,
+                        member.display_name,
+                        member.bot,
+                    )
+                log.info("Guild member sync complete for %s (%d)", guild.name, guild.id)
+            except Exception as exc:
+                log.warning("Could not sync guild members for %s: %s", guild.name, exc)
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member) -> None:
+        await queries.upsert_guild_member(
+            config.DATABASE_PATH,
+            member.guild.id,
+            member.id,
+            str(member) if hasattr(member, "discriminator") and member.discriminator != "0" else member.name,
+            member.display_name,
+            member.bot,
+        )
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        await queries.remove_guild_member(config.DATABASE_PATH, member.guild.id, member.id)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        if before.display_name != after.display_name or before.name != after.name:
+            await queries.upsert_guild_member(
+                config.DATABASE_PATH,
+                after.guild.id,
+                after.id,
+                str(after) if hasattr(after, "discriminator") and after.discriminator != "0" else after.name,
+                after.display_name,
+                after.bot,
+            )
+
     admin_group = app_commands.Group(name="admin", description="Bot administration commands")
 
     # ── Permissions ────────────────────────────────────────────────────────────
@@ -604,6 +649,71 @@ class Admin(commands.Cog):
         await asyncio.sleep(1)
         await self.bot.do_restart()
 
+
+    # ── Member audit (unregistered) ────────────────────────────────────────────
+
+    @admin_group.command(
+        name="unregistered",
+        description="List guild members who have not registered any characters",
+    )
+    async def unregistered_members(self, interaction: discord.Interaction) -> None:
+        if not await is_admin(interaction):
+            await interaction.response.send_message(
+                embed=embeds.error_embed("Permission Denied", "Only server admins can run a member audit."),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        unregistered = await queries.get_unregistered_members(
+            config.DATABASE_PATH, interaction.guild_id
+        )
+
+        if not unregistered:
+            await interaction.followup.send(
+                embed=embeds.success_embed(
+                    "All Clear!",
+                    "Every non-bot member in this server has at least one character registered.",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # Build embed — Discord limits fields to 25, so paginate the list into chunks
+        embed = discord.Embed(
+            title=f"👤  Unregistered Members — {len(unregistered)} found",
+            description=(
+                f"The following **{len(unregistered)}** member(s) are in the server "
+                f"but have **no characters registered**."
+            ),
+            color=0xE67E22,
+        )
+
+        # Build a plain text list, mention by Discord ID
+        lines = []
+        for m in unregistered:
+            display = m.get("display_name") or m.get("username") or f"<@{m['discord_id']}>"
+            lines.append(f"<@{m['discord_id']}> — {display}")
+
+        # Split into chunks of 20 per field to stay under Discord limits
+        chunk_size = 20
+        for i in range(0, min(len(lines), 100), chunk_size):
+            chunk = lines[i:i + chunk_size]
+            embed.add_field(
+                name="\u200b",
+                value="\n".join(chunk),
+                inline=False,
+            )
+
+        if len(unregistered) > 100:
+            embed.set_footer(text=f"Showing first 100 of {len(unregistered)}. Check the web admin panel for the full list.")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        log.info(
+            "Member audit by %s: %d unregistered member(s) in guild %d",
+            interaction.user, len(unregistered), interaction.guild_id,
+        )
 
     # ── Admin character management ─────────────────────────────────────────────
 

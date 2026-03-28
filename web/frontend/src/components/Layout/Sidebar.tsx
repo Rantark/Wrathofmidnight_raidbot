@@ -29,7 +29,7 @@ export function Sidebar() {
           </div>
           <div className="min-w-0">
             <p className="font-bold text-sm leading-tight truncate">Wrath of Midnight</p>
-            <p className="text-gray-400 text-xs">Raid Portal <span className="font-mono">v1.6.0</span></p>
+            <p className="text-gray-400 text-xs">Raid Portal <span className="font-mono">v1.7.0</span></p>
           </div>
         </div>
       </div>

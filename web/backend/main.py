@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import CORS_ORIGINS, API_HOST, API_PORT
 from routers import auth, characters, events, attendance, admin, templates, changelog
 
-app = FastAPI(title="WoW Raid Bot API", version="1.6.0")
+app = FastAPI(title="WoW Raid Bot API", version="1.7.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,7 +27,7 @@ app.include_router(changelog.router, prefix="/api")
 
 @app.get("/")
 async def root():
-    return {"message": "WoW Raid Bot API", "version": "1.6.0"}
+    return {"message": "WoW Raid Bot API", "version": "1.7.0"}
 
 
 @app.get("/health")
