@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import logging
 from typing import Any, Optional
+from urllib.parse import quote, unquote
 
 import aiohttp
 
@@ -47,14 +48,21 @@ class RaiderIO:
           gear.item_level_equipped, thumbnail_url
         """
         realm_slug = _slugify_realm(realm)
-        url = (
-            f"{_BASE}/characters/profile"
-            f"?region={region}&realm={realm_slug}&name={name.lower()}&fields={_FIELDS}"
-        )
-        print(f"[RaiderIO DEBUG] GET {url}", flush=True)
+        # Use params= so aiohttp handles percent-encoding of special chars
+        params = {
+            "region": region,
+            "realm": realm_slug,
+            "name": name.lower(),
+            "fields": _FIELDS,
+        }
+        print(f"[RaiderIO DEBUG] GET {_BASE}/characters/profile params={params}", flush=True)
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                async with session.get(
+                    f"{_BASE}/characters/profile",
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
                     body = await resp.text()
                     print(f"[RaiderIO DEBUG] HTTP {resp.status} body: {body[:500]}", flush=True)
                     if resp.status != 200:
@@ -78,17 +86,22 @@ def parse_url(url: str) -> Optional[tuple[str, str, str]]:
     Accepts URLs like:
       https://raider.io/characters/us/stormrage/thrall
       raider.io/characters/eu/silvermoon/arthas
+      https://raider.io/characters/eu/kazzak/%C3%91ight   (percent-encoded names)
 
     Returns None if the URL doesn't match the expected format or has an
-    invalid region.
+    invalid region. The returned name is Unicode (percent-encoding decoded).
     """
+    # Allow percent-encoded characters (%XX) and hyphens in the name segment
     match = re.search(
-        r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
-        url.lower().strip(),
+        r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([\w%\-]+)",
+        url.strip(),
+        re.IGNORECASE,
     )
     if not match:
         return None
-    region, realm, name = match.groups()
+    region = match.group(1).lower()
+    realm  = match.group(2).lower()
+    name   = unquote(match.group(3).lower())   # decode %C3%91 → ñ etc.
     if region not in ("us", "eu", "kr", "tw"):
         return None
     return region, realm, name

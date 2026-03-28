@@ -701,17 +701,21 @@ class Characters(commands.Cog):
 
         # Resolve lookup coords: prefer raiderio_url, fall back to realm+region
         import re as _re
+        from urllib.parse import unquote as _unquote
         lookup_region = char.get("region") or "us"
         lookup_realm  = char.get("realm")
         lookup_name   = char["char_name"]
 
         rio_url = char.get("raiderio_url") or ""
         url_match = _re.search(
-            r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
-            rio_url.lower(),
+            r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([\w%\-]+)",
+            rio_url.strip(),
+            _re.IGNORECASE,
         )
         if url_match:
-            lookup_region, lookup_realm, lookup_name = url_match.groups()
+            lookup_region = url_match.group(1).lower()
+            lookup_realm  = url_match.group(2).lower()
+            lookup_name   = _unquote(url_match.group(3).lower())
 
         if not lookup_realm:
             await interaction.followup.send(

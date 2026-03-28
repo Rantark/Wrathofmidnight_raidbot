@@ -1,5 +1,6 @@
 import re
 import aiohttp
+from urllib.parse import unquote
 from fastapi import APIRouter, HTTPException, Depends
 from database.connection import get_db
 from database.queries import (
@@ -24,19 +25,45 @@ def _slugify_realm(name: str) -> str:
 
 async def _rio_lookup(region: str, realm: str, char_name: str) -> dict | None:
     """Call Raider.IO public API; return parsed profile or None."""
-    url = (
-        f"{_RIO_BASE}/characters/profile"
-        f"?region={region}&realm={_slugify_realm(realm)}&name={char_name.lower()}"
-        f"&fields=gear,spec"
-    )
+    # Use params= so aiohttp handles percent-encoding of special chars (alt-code names)
+    params = {
+        "region": region,
+        "realm": _slugify_realm(realm),
+        "name": char_name.lower(),
+        "fields": "gear,spec",
+    }
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with session.get(
+                f"{_RIO_BASE}/characters/profile",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
                 if resp.status != 200:
                     return None
                 return await resp.json()
     except Exception:
         return None
+
+
+# Regex that matches the name segment of a Raider.IO URL, including percent-encoded chars
+_RIO_URL_RE = re.compile(
+    r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([\w%\-]+)",
+    re.IGNORECASE,
+)
+
+
+def _parse_rio_url(url: str) -> tuple[str, str, str] | None:
+    """Return (region, realm, name) from a Raider.IO URL, or None if invalid."""
+    m = _RIO_URL_RE.search(url.strip())
+    if not m:
+        return None
+    region = m.group(1).lower()
+    realm  = m.group(2).lower()
+    name   = unquote(m.group(3).lower())  # decode %C3%91ight → ñight etc.
+    if region not in ("us", "eu", "kr", "tw"):
+        return None
+    return region, realm, name
 
 
 @router.get("")
@@ -73,13 +100,9 @@ async def sync_character_raiderio(
     realm  = row["realm"]
     name   = row["char_name"]
 
-    rio_url = row.get("raiderio_url") or ""
-    url_match = re.search(
-        r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
-        rio_url.lower(),
-    )
-    if url_match:
-        region, realm, name = url_match.groups()
+    parsed = _parse_rio_url(row.get("raiderio_url") or "")
+    if parsed:
+        region, realm, name = parsed
 
     if not realm:
         raise HTTPException(400, "No realm stored for this character — cannot sync with Raider.IO")
@@ -134,14 +157,10 @@ async def sync_all_characters_raiderio(user: dict = Depends(require_officer)):
         region    = row["region"] or "us"
         realm     = row["realm"]
         name      = row["char_name"]
-        rio_url   = row["raiderio_url"] or ""
 
-        url_match = re.search(
-            r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
-            rio_url.lower(),
-        )
-        if url_match:
-            region, realm, name = url_match.groups()
+        parsed = _parse_rio_url(row["raiderio_url"] or "")
+        if parsed:
+            region, realm, name = parsed
 
         if not realm:
             skipped.append({"char_name": row["char_name"], "reason": "no realm"})
@@ -194,14 +213,11 @@ async def raiderio_lookup(body: dict, user: dict = Depends(get_current_user)):
     Expects: {"url": "https://raider.io/characters/us/stormrage/thrall"}
     """
     url = (body.get("url") or "").strip()
-    match = re.search(
-        r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
-        url.lower(),
-    )
-    if not match or match.group(1) not in ("us", "eu", "kr", "tw"):
+    parsed = _parse_rio_url(url)
+    if not parsed:
         raise HTTPException(400, "Invalid Raider.IO character URL")
 
-    region, realm, char_name = match.groups()
+    region, realm, char_name = parsed
     data = await _rio_lookup(region, realm, char_name)
     if data is None:
         raise HTTPException(404, f"Character '{char_name}' not found on Raider.IO ({region}/{realm})")
