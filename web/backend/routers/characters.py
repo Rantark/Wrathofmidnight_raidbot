@@ -6,7 +6,7 @@ from database.queries import (
     get_user_characters, get_all_characters,
     log_character_action, get_char_registration_log,
 )
-from middleware.auth import get_current_user, require_officer
+from middleware.auth import get_current_user, require_officer, require_raid_leader
 from models.schemas import CharacterCreate, CharacterUpdate, CharacterAdminUpdate
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
@@ -45,7 +45,7 @@ async def list_characters(user: dict = Depends(get_current_user)):
 
 
 @router.get("/roster")
-async def guild_roster(user: dict = Depends(require_officer)):
+async def guild_roster(user: dict = Depends(require_raid_leader)):
     return await get_all_characters(int(user["guild_id"]))
 
 
@@ -115,7 +115,7 @@ async def sync_character_raiderio(
 
 
 @router.get("/log")
-async def character_registration_log(user: dict = Depends(require_officer)):
+async def character_registration_log(user: dict = Depends(require_raid_leader)):
     """Return the last 200 character registration/deletion events (officers only)."""
     return await get_char_registration_log(int(user["guild_id"]))
 

@@ -12,7 +12,8 @@ import type { Character } from '@/types';
 type Tab = 'mine' | 'roster';
 
 export function CharactersPage() {
-  const { isOfficer } = useAuth();
+  const { isOfficer, isRaidLeader } = useAuth();
+  const canViewRoster = isOfficer || isRaidLeader;
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('mine');
   const [showForm, setShowForm] = useState(false);
@@ -24,11 +25,12 @@ export function CharactersPage() {
     queryFn: () => api.get('/api/characters').then((r) => r.data),
   });
 
-  // Guild roster (officers only)
-  const { data: rosterChars = [], isLoading: rosterLoading } = useQuery<Character[]>({
+  // Guild roster (officers + raid leaders)
+  const { data: rosterChars = [], isLoading: rosterLoading, isError: rosterError, error: rosterErrorObj } = useQuery<Character[]>({
     queryKey: ['characters-roster'],
     queryFn: () => api.get('/api/characters/roster').then((r) => r.data),
-    enabled: isOfficer,
+    enabled: canViewRoster,
+    retry: 1,
   });
 
   async function handleSetMain(charName: string) {
@@ -57,8 +59,8 @@ export function CharactersPage() {
         )}
       </div>
 
-      {/* Tab switcher (show only for officers) */}
-      {isOfficer && (
+      {/* Tab switcher (show only for officers/raid leaders) */}
+      {canViewRoster && (
         <div className="flex gap-1 p-1 glass rounded-xl w-fit">
           {(['mine', 'roster'] as Tab[]).map((t) => (
             <button
@@ -121,13 +123,30 @@ export function CharactersPage() {
       )}
 
       {/* Guild Roster tab */}
-      {tab === 'roster' && isOfficer && (
-        <RosterTab
-          characters={rosterChars}
-          isLoading={rosterLoading}
-          onEdit={(c) => setEditingChar(c)}
-          onDeleted={() => qc.invalidateQueries({ queryKey: ['characters-roster'] })}
-        />
+      {tab === 'roster' && canViewRoster && (
+        rosterError ? (
+          <div className="glass rounded-xl p-6 text-center space-y-2">
+            <p className="text-red-400 font-semibold">Failed to load roster</p>
+            <p className="text-gray-400 text-sm">
+              {(rosterErrorObj as any)?.response?.data?.detail
+                ?? (rosterErrorObj as any)?.message
+                ?? 'Unknown error — check the browser console for details'}
+            </p>
+            <button
+              onClick={() => qc.invalidateQueries({ queryKey: ['characters-roster'] })}
+              className="btn-secondary text-sm mt-2"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <RosterTab
+            characters={rosterChars}
+            isLoading={rosterLoading}
+            onEdit={(c) => setEditingChar(c)}
+            onDeleted={() => qc.invalidateQueries({ queryKey: ['characters-roster'] })}
+          />
+        )
       )}
 
       {/* Edit modal */}
