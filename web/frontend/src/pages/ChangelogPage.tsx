@@ -1,5 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import changelogData from '@/changelog.json';
 import { Tag, Sparkles, Wrench, Trash2, TrendingUp } from 'lucide-react';
 
 interface ChangeEntry {
@@ -20,40 +19,31 @@ interface Changelog {
 }
 
 const TYPE_META = {
-  new:      { label: 'New',      icon: Sparkles,    bg: 'bg-indigo-500/20', text: 'text-indigo-300', border: 'border-indigo-500/30' },
-  improved: { label: 'Improved', icon: TrendingUp,  bg: 'bg-blue-500/20',   text: 'text-blue-300',   border: 'border-blue-500/30'   },
-  fix:      { label: 'Fix',      icon: Wrench,       bg: 'bg-green-500/20',  text: 'text-green-300',  border: 'border-green-500/30'  },
-  removed:  { label: 'Removed',  icon: Trash2,       bg: 'bg-red-500/20',    text: 'text-red-300',    border: 'border-red-500/30'    },
+  new:      { label: 'New',      icon: Sparkles,   bg: 'bg-indigo-500/20', text: 'text-indigo-300', border: 'border-indigo-500/30' },
+  improved: { label: 'Improved', icon: TrendingUp, bg: 'bg-blue-500/20',   text: 'text-blue-300',   border: 'border-blue-500/30'   },
+  fix:      { label: 'Fix',      icon: Wrench,     bg: 'bg-green-500/20',  text: 'text-green-300',  border: 'border-green-500/30'  },
+  removed:  { label: 'Removed',  icon: Trash2,     bg: 'bg-red-500/20',    text: 'text-red-300',    border: 'border-red-500/30'    },
 } as const;
 
-export function ChangelogPage() {
-  const { data, isLoading, isError } = useQuery<Changelog>({
-    queryKey: ['changelog'],
-    queryFn: () => api.get('/api/changelog').then((r) => r.data),
-    staleTime: 5 * 60 * 1000,
-  });
+const data = changelogData as Changelog;
 
+export function ChangelogPage() {
   return (
     <div className="p-4 lg:p-8 max-w-3xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
         <Tag size={22} className="text-indigo-400" />
         <div>
           <h1 className="text-2xl font-extrabold">Changelog</h1>
-          {data?.current && (
-            <p className="text-sm text-gray-400">Current version: <span className="text-indigo-300 font-mono font-semibold">v{data.current}</span></p>
+          {data.current && (
+            <p className="text-sm text-gray-400">
+              Current version:{' '}
+              <span className="text-indigo-300 font-mono font-semibold">v{data.current}</span>
+            </p>
           )}
         </div>
       </div>
 
-      {isLoading && (
-        <div className="text-center text-gray-500 py-12">Loading…</div>
-      )}
-
-      {isError && (
-        <div className="glass rounded-xl p-6 text-center text-red-400">Failed to load changelog</div>
-      )}
-
-      {data?.entries.map((entry, i) => (
+      {data.entries.map((entry, i) => (
         <div key={entry.version} className="glass rounded-2xl overflow-hidden">
           {/* Version header */}
           <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-gray-700/50">
