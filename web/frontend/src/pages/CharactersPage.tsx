@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, Search, UserPlus } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, UserPlus, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 import { CharacterCard } from '@/components/Characters/CharacterCard';
 import { CharacterForm } from '@/components/Characters/CharacterForm';
@@ -269,6 +269,7 @@ function RosterTab({
   const [classFilter, setClassFilter] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [addDiscordId, setAddDiscordId] = useState('');
+  const [syncing, setSyncing] = useState<string | null>(null); // key = `${discord_id}-${char_name}`
 
   async function handleOfficerDelete(c: Character) {
     if (!confirm(`Delete ${c.char_name}? This cannot be undone.`)) return;
@@ -277,6 +278,25 @@ function RosterTab({
       onDeleted();
     } catch (err: any) {
       alert(err.response?.data?.detail ?? 'Delete failed');
+    }
+  }
+
+  async function handleSyncRio(c: Character) {
+    const key = `${c.discord_id}-${c.char_name}`;
+    setSyncing(key);
+    try {
+      const res = await api.post(`/api/characters/sync-rio/${c.discord_id}/${encodeURIComponent(c.char_name)}`);
+      const u = res.data.updates ?? {};
+      const parts = [];
+      if (u.ilvl)       parts.push(`ilvl → ${u.ilvl}`);
+      if (u.main_spec)  parts.push(`spec → ${u.main_spec}`);
+      if (u.avatar_url) parts.push('portrait updated');
+      alert(parts.length ? `Synced ${c.char_name}: ${parts.join(', ')}` : `${c.char_name} is already up to date`);
+      onDeleted(); // reuse to invalidate/refresh roster
+    } catch (err: any) {
+      alert(err.response?.data?.detail ?? 'Sync failed');
+    } finally {
+      setSyncing(null);
     }
   }
 
@@ -384,6 +404,14 @@ function RosterTab({
                       </div>
                       {/* Officer action buttons on hover */}
                       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => handleSyncRio(c)}
+                          disabled={syncing === `${c.discord_id}-${c.char_name}`}
+                          className="w-6 h-6 flex items-center justify-center rounded bg-white/10 hover:bg-green-700 transition-colors disabled:opacity-50"
+                          title="Sync with Raider.IO"
+                        >
+                          <RefreshCw size={11} className={syncing === `${c.discord_id}-${c.char_name}` ? 'animate-spin' : ''} />
+                        </button>
                         <button
                           onClick={() => onEdit(c)}
                           className="w-6 h-6 flex items-center justify-center rounded bg-white/10 hover:bg-indigo-600 transition-colors"

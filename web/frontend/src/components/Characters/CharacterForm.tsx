@@ -24,6 +24,7 @@ export function CharacterForm({ onSuccess, onCancel, officerTargetDiscordId }: P
     region: 'us',
     progression: '',
     raiderio_url: '',
+    avatar_url: '',
   });
   const [saving, setSaving] = useState(false);
   const [looking, setLooking] = useState(false);
@@ -39,13 +40,14 @@ export function CharacterForm({ onSuccess, onCancel, officerTargetDiscordId }: P
       const d = res.data;
       setForm(f => ({
         ...f,
-        char_name:   d.char_name  || f.char_name,
-        char_class:  d.char_class || f.char_class,
-        main_spec:   d.main_spec  || f.main_spec,
-        ilvl:        d.ilvl != null ? String(d.ilvl) : f.ilvl,
-        realm:       d.realm      || f.realm,
-        region:      d.region     || f.region,
+        char_name:    d.char_name    || f.char_name,
+        char_class:   d.char_class   || f.char_class,
+        main_spec:    d.main_spec    || f.main_spec,
+        ilvl:         d.ilvl != null ? String(d.ilvl) : f.ilvl,
+        realm:        d.realm        || f.realm,
+        region:       d.region       || f.region,
         raiderio_url: d.raiderio_url || f.raiderio_url,
+        avatar_url:   d.thumbnail_url || f.avatar_url,
       }));
     } catch (err: any) {
       setLookupError(err.response?.data?.detail ?? 'Raider.IO lookup failed');
@@ -66,6 +68,7 @@ export function CharacterForm({ onSuccess, onCancel, officerTargetDiscordId }: P
         realm: form.realm || undefined,
         progression: form.progression || undefined,
         raiderio_url: form.raiderio_url || undefined,
+        avatar_url: form.avatar_url || undefined,
       };
       if (officerTargetDiscordId) {
         await api.post(`/api/characters/officer?target_discord_id=${officerTargetDiscordId}`, body);
@@ -113,6 +116,12 @@ export function CharacterForm({ onSuccess, onCancel, officerTargetDiscordId }: P
             </button>
           </div>
           {lookupError && <p className="text-red-400 text-xs mt-1">{lookupError}</p>}
+          {form.avatar_url && (
+            <div className="flex items-center gap-2 mt-1">
+              <img src={form.avatar_url} alt="" className="w-8 h-8 rounded-md object-cover" />
+              <span className="text-xs text-green-400">Character found — fields auto-filled</span>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-3">

@@ -49,6 +49,71 @@ async def guild_roster(user: dict = Depends(require_officer)):
     return await get_all_characters(int(user["guild_id"]))
 
 
+@router.post("/sync-rio/{discord_id}/{char_name}")
+async def sync_character_raiderio(
+    discord_id: int,
+    char_name: str,
+    user: dict = Depends(require_officer),
+):
+    """Re-fetch ilvl, spec, and avatar from Raider.IO for a character (officers only)."""
+    guild_id = int(user["guild_id"])
+
+    async with get_db() as db:
+        cur = await db.execute(
+            "SELECT char_name, char_class, realm, region, raiderio_url FROM characters "
+            "WHERE discord_id=? AND guild_id=? AND char_name=?",
+            (discord_id, guild_id, char_name),
+        )
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Character not found")
+
+    # Resolve lookup coordinates: prefer raiderio_url, fall back to realm+region
+    region = row["region"] or "us"
+    realm  = row["realm"]
+    name   = row["char_name"]
+
+    rio_url = row.get("raiderio_url") or ""
+    url_match = re.search(
+        r"raider\.io/characters/([a-z]{2})/([a-z0-9\-]+)/([a-z]+)",
+        rio_url.lower(),
+    )
+    if url_match:
+        region, realm, name = url_match.groups()
+
+    if not realm:
+        raise HTTPException(400, "No realm stored for this character — cannot sync with Raider.IO")
+
+    data = await _rio_lookup(region, realm, name)
+    if data is None:
+        raise HTTPException(404, f"Character not found on Raider.IO ({region}/{realm}/{name})")
+
+    updates: dict = {}
+    new_ilvl = (data.get("gear") or {}).get("item_level_equipped")
+    new_spec  = data.get("active_spec_name")
+    new_thumb = data.get("thumbnail_url")
+    if new_ilvl:
+        updates["ilvl"] = new_ilvl
+    if new_spec:
+        updates["main_spec"] = new_spec
+    if new_thumb:
+        updates["avatar_url"] = new_thumb
+
+    if updates:
+        async with get_db() as db:
+            set_clause = ", ".join(f"{k}=?" for k in updates)
+            await db.execute(
+                f"UPDATE characters SET {set_clause} WHERE discord_id=? AND guild_id=? AND char_name=?",
+                list(updates.values()) + [discord_id, guild_id, char_name],
+            )
+            await db.commit()
+
+    return {
+        "message": f"Synced {char_name} from Raider.IO",
+        "updates": updates,
+    }
+
+
 @router.get("/log")
 async def character_registration_log(user: dict = Depends(require_officer)):
     """Return the last 200 character registration/deletion events (officers only)."""
@@ -114,11 +179,11 @@ async def officer_create_character(
         await db.execute(
             """INSERT INTO characters
                (discord_id, guild_id, char_name, char_class, main_spec, off_spec,
-                is_main, ilvl, realm, region, professions, progression, raiderio_url)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                is_main, ilvl, realm, region, professions, progression, raiderio_url, avatar_url)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (target_discord_id, guild_id, body.char_name, body.char_class, body.main_spec,
              body.off_spec, is_main, body.ilvl, body.realm, body.region,
-             body.professions, body.progression, body.raiderio_url),
+             body.professions, body.progression, body.raiderio_url, body.avatar_url),
         )
         await db.commit()
 
@@ -228,11 +293,11 @@ async def create_character(body: CharacterCreate, user: dict = Depends(get_curre
         await db.execute(
             """INSERT INTO characters
                (discord_id, guild_id, char_name, char_class, main_spec, off_spec,
-                is_main, ilvl, realm, region, professions, progression, raiderio_url)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                is_main, ilvl, realm, region, professions, progression, raiderio_url, avatar_url)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (discord_id, guild_id, body.char_name, body.char_class, body.main_spec,
              body.off_spec, is_main, body.ilvl, body.realm, body.region,
-             body.professions, body.progression, body.raiderio_url),
+             body.professions, body.progression, body.raiderio_url, body.avatar_url),
         )
         await db.commit()
 

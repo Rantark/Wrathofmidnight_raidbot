@@ -22,6 +22,7 @@ class CharacterCreate(BaseModel):
     professions: Optional[str] = None
     progression: Optional[str] = None
     raiderio_url: Optional[str] = None
+    avatar_url: Optional[str] = None
 
     @field_validator("char_name")
     @classmethod
