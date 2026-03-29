@@ -133,21 +133,11 @@ class RaidBot(commands.Bot):
             except Exception as exc:
                 log.exception("  ✗ Failed to load %s: %s", cog, exc)
 
-        # Sync to known guilds immediately.  Full sync to all connected guilds
-        # happens in on_ready once self.guilds is populated.
+        # Copy global commands to known guilds so they're ready when on_ready fires.
+        # Actual sync() calls are deferred to on_ready where a connection exists.
         for gid in config.GUILD_IDS:
             guild = discord.Object(id=gid)
             self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            log.info("Synced %d slash commands to guild %d", len(synced), gid)
-
-        # Clear the global command list AFTER guild syncs so that any stale
-        # globally-registered commands (from a previous deployment) are removed.
-        # copy_global_to already pushed everything to each guild, so doing this
-        # last means the guild registrations are intact.
-        self.tree.clear_commands(guild=None)
-        await self.tree.sync()
-        log.info("Cleared global slash commands (prevents duplicates)")
 
         # Start background tasks
         self.reminder_loop.start()
@@ -162,17 +152,21 @@ class RaidBot(commands.Bot):
         log.info("Database: %s", config.DATABASE_PATH)
         log.info("=" * 60)
 
-        # Sync commands to every guild the bot is currently in.
-        # Guild syncs are instant and don't count toward Discord's global
-        # command registration rate limit (200/day), so this is safe to run
-        # on every startup without risk of members losing slash command access.
+        # Sync commands to all guilds now that we have a live connection.
+        # Known guilds had copy_global_to called in setup_hook; unknown guilds
+        # (added while the bot was offline) get it here before syncing.
         known = set(config.GUILD_IDS)
         for guild in self.guilds:
             if guild.id not in known:
                 self.tree.copy_global_to(guild=guild)
-                synced = await self.tree.sync(guild=guild)
-                log.info("Synced %d commands to guild %s (%d)", len(synced), guild.name, guild.id)
                 _persist_guild_id(guild.id)
+            synced = await self.tree.sync(guild=discord.Object(id=guild.id))
+            log.info("Synced %d commands to guild %s (%d)", len(synced), guild.name, guild.id)
+
+        # Clear stale globally-registered commands after guild syncs are done.
+        self.tree.clear_commands(guild=None)
+        await self.tree.sync()
+        log.info("Cleared global slash commands (prevents duplicates)")
 
         await self.change_presence(
             activity=discord.Activity(
