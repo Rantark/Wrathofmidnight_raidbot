@@ -43,7 +43,9 @@ class Admin(commands.Cog):
         self.bot = bot
 
     async def cog_load(self) -> None:
-        """Sync all guild members to the DB on startup so the web audit has up-to-date data."""
+        self.bot.loop.create_task(self._sync_members())
+
+    async def _sync_members(self) -> None:
         await self.bot.wait_until_ready()
         for guild in self.bot.guilds:
             try:
@@ -53,12 +55,9 @@ class Admin(commands.Cog):
                         guild.id,
                         member.id,
                         str(member) if hasattr(member, "discriminator") and member.discriminator != "0" else member.name,
-                        member.display_name,
-                        member.bot,
                     )
-                log.info("Guild member sync complete for %s (%d)", guild.name, guild.id)
-            except Exception as exc:
-                log.warning("Could not sync guild members for %s: %s", guild.name, exc)
+            except Exception as e:
+                log.warning("Failed to sync members for guild %s: %s", guild.id, e)
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
