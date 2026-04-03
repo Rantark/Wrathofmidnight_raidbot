@@ -54,7 +54,7 @@ class Admin(commands.Cog):
                         config.DATABASE_PATH,
                         guild.id,
                         member.id,
-                        str(member) if hasattr(member, "discriminator") and member.discriminator != "0" else member.name,
+                        str(member) if hasattr(member, "discriminator") and member.discriminator != "0" else member.name,member.display_name,
                     )
             except Exception as e:
                 log.warning("Failed to sync members for guild %s: %s", guild.id, e)
